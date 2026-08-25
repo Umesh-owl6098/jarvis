@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JARVIS Test Fixture</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        input, button, textarea {
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #999;
+            border-radius: 3px;
+        }
+        button {
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+        }
+        button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 3px;
+            min-height: 20px;
+        }
+        a {
+            display: inline-block;
+            margin: 5px;
+            padding: 8px 12px;
+            background-color: #28a745;
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+        }
+        a:hover {
+            background-color: #218838;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>JARVIS Interaction Test Fixture</h1>
+
+    <!-- Search Section -->
+    <div class="test-section">
+        <h2>Search Test</h2>
+        <p>Task: Search for "JARVIS" and see the result</p>
+        <input type="text" id="search-box" placeholder="Search products...">
+        <button id="search-btn">Search</button>
+        <div class="result" id="search-result"></div>
+    </div>
+
+    <!-- Navigation Section -->
+    <div class="test-section">
+        <h2>Navigation Test</h2>
+        <p>Task: Click on different pages</p>
+        <div id="page-content">
+            <p>Current page: <strong id="current-page">Home</strong></p>
+            <a href="#" id="page-1-link">Go to Page 1</a>
+            <a href="#" id="page-2-link">Go to Page 2</a>
+            <a href="#" id="page-3-link">Go to Page 3</a>
+        </div>
+        <div class="result" id="page-heading"></div>
+    </div>
+
+    <!-- Form Section -->
+    <div class="test-section">
+        <h2>Form Test</h2>
+        <p>Task: Enter text and submit</p>
+        <input type="text" id="form-input" placeholder="Enter your message">
+        <button id="form-submit">Submit</button>
+        <div class="result" id="form-result"></div>
+    </div>
+
+    <!-- Dynamic Content Section -->
+    <div class="test-section">
+        <h2>Dynamic Content Test</h2>
+        <p>Task: Click button to reveal hidden content</p>
+        <button id="toggle-btn">Show Hidden Content</button>
+        <div id="hidden-content" class="hidden">
+            <p>This content was hidden and is now revealed!</p>
+            <p>It contains important information that appears dynamically.</p>
+        </div>
+    </div>
+
+    <!-- Disabled Button Section -->
+    <div class="test-section">
+        <h2>Disabled Button Test</h2>
+        <p>This button is disabled and cannot be clicked:</p>
+        <button id="disabled-btn" disabled>Disabled Button</button>
+        <p id="disabled-message" style="display:none; color: green;">You tried to click a disabled button!</p>
+    </div>
+
+    <!-- Element Disappearance Section -->
+    <div class="test-section">
+        <h2>Stale Element Test</h2>
+        <p>Task: Click the temporary button before it disappears</p>
+        <button id="temporary-btn">Click Me (disappears in 5s)</button>
+        <div class="result" id="temp-result"></div>
+    </div>
+
+    <script>
+        // Search functionality
+        document.getElementById('search-btn').addEventListener('click', function() {
+            const query = document.getElementById('search-box').value;
+            const result = document.getElementById('search-result');
+            if (query.toLowerCase() === 'jarvis') {
+                result.textContent = '✓ Found: JARVIS - An autonomous web agent';
+                result.style.backgroundColor = '#d4edda';
+            } else if (query.trim() === '') {
+                result.textContent = 'Please enter a search term';
+                result.style.backgroundColor = '#fff3cd';
+            } else {
+                result.textContent = `No results found for "${query}"`;
+                result.style.backgroundColor = '#f8d7da';
+            }
+        });
+
+        // Page navigation
+        function setPage(pageName, heading) {
+            document.getElementById('current-page').textContent = pageName;
+            document.getElementById('page-heading').textContent = heading;
+        }
+
+        document.getElementById('page-1-link').addEventListener('click', function(e) {
+            e.preventDefault();
+            setPage('Page 1', '📄 Page 1: Introduction to JARVIS');
+        });
+
+        document.getElementById('page-2-link').addEventListener('click', function(e) {
+            e.preventDefault();
+            setPage('Page 2', '🔧 Page 2: Technical Architecture');
+        });
+
+        document.getElementById('page-3-link').addEventListener('click', function(e) {
+            e.preventDefault();
+            setPage('Page 3', '📊 Page 3: Performance Metrics');
+        });
+
+        // Form submission
+        document.getElementById('form-submit').addEventListener('click', function() {
+            const input = document.getElementById('form-input').value;
+            const result = document.getElementById('form-result');
+            if (input.trim() === '') {
+                result.textContent = 'Message cannot be empty';
+                result.style.backgroundColor = '#fff3cd';
+            } else {
+                result.textContent = `✓ Message submitted: "${input}"`;
+                result.style.backgroundColor = '#d4edda';
+                document.getElementById('form-input').value = '';
+            }
+        });
+
+        // Toggle hidden content
+        let contentVisible = false;
+        document.getElementById('toggle-btn').addEventListener('click', function() {
+            const hidden = document.getElementById('hidden-content');
+            contentVisible = !contentVisible;
+            if (contentVisible) {
+                hidden.classList.remove('hidden');
+                this.textContent = 'Hide Content';
+            } else {
+                hidden.classList.add('hidden');
+                this.textContent = 'Show Content';
+            }
+        });
+
+        // Disabled button feedback
+        document.getElementById('disabled-btn').addEventListener('click', function() {
+            // This won't fire since button is disabled
+            document.getElementById('disabled-message').style.display = 'block';
+        });
+
+        // Temporary button that disappears
+        let tempButtonClicked = false;
+        const tempBtn = document.getElementById('temporary-btn');
+        const tempResult = document.getElementById('temp-result');
+
+        tempBtn.addEventListener('click', function() {
+            tempButtonClicked = true;
+            tempResult.textContent = '✓ You clicked the temporary button!';
+            tempResult.style.backgroundColor = '#d4edda';
+        });
+
+        // Make temporary button disappear after 5 seconds
+        setTimeout(function() {
+            if (!tempButtonClicked) {
+                tempBtn.style.display = 'none';
+                tempResult.textContent = '✗ Temporary button disappeared (not clicked in time)';
+                tempResult.style.backgroundColor = '#f8d7da';
+            } else {
+                tempBtn.style.display = 'none';
+                tempResult.textContent += ' (button has now disappeared)';
+            }
+        }, 5000);
+    </script>
+</body>
+</html>

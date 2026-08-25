@@ -1,0 +1,200 @@
+@import "tailwindcss";
+
+/* ============================================================
+   JARVIS — Design tokens
+   Single accent (cyan). Semantic states only for real agent
+   outcomes. Void-black canvas. No purple, no gradients-as-decor.
+   ============================================================ */
+:root {
+  color-scheme: dark;
+
+  --j-void: #04070d;
+  --j-deep: #070c15;
+  --j-panel: #080e1a;
+
+  --j-accent: #2ee6ff;
+  --j-accent-dim: #0e7d96;
+  --j-accent-faint: rgba(53, 224, 255, 0.14);
+  --j-accent-line: rgba(46, 230, 255, 0.34);
+
+  --j-ok: #38e08a;
+  --j-warn: #ffb020;
+  --j-bad: #ff4d5e;
+  --j-dormant: #5a6a7d;
+
+  --j-ink: #e8f5fb;
+  --j-body: #93aec0;
+  --j-mute: #5d7488;
+
+  --j-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --j-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* angular HUD corner cut */
+  --j-cut: 9px;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: var(--j-void);
+  color: var(--j-ink);
+  font-family: var(--j-sans);
+  overscroll-behavior: none;
+}
+
+/* ---------- HUD primitives ---------- */
+
+/* Angular clipped corners — the core HUD silhouette */
+.j-clip {
+  clip-path: polygon(
+    var(--j-cut) 0,
+    100% 0,
+    100% calc(100% - var(--j-cut)),
+    calc(100% - var(--j-cut)) 100%,
+    0 100%,
+    0 var(--j-cut)
+  );
+}
+
+/* 1px illuminated border rendered as a padded gradient shell */
+.j-frame {
+  background:
+    linear-gradient(150deg, var(--j-accent-line), rgba(53, 224, 255, 0.05) 42%, rgba(53, 224, 255, 0.18));
+  padding: 1px;
+}
+
+/* Fine technical grid texture inside panels */
+.j-grid-tex {
+  background-image:
+    linear-gradient(rgba(53, 224, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(53, 224, 255, 0.05) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* Numeric readouts must not jitter */
+.j-num {
+  font-family: var(--j-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.j-label {
+  font-family: var(--j-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--j-mute);
+}
+
+/* Scanline sweep — transform/opacity only (compositor-safe) */
+@keyframes j-sweep {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { transform: translateY(1200%); opacity: 0; }
+}
+.j-scanline {
+  animation: j-sweep 3.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes j-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+.j-blink { animation: j-blink 1.4s ease-in-out infinite; }
+
+/* Panel entrance — short cinematic response, not a loop */
+@keyframes j-materialize {
+  from { opacity: 0; transform: translate3d(0, 6px, 0) scale(0.985); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+.j-enter { animation: j-materialize 260ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Completion wave — fires once when a task resolves */
+@keyframes j-wave {
+  from { opacity: 0.55; transform: scale(0.82); }
+  to   { opacity: 0; transform: scale(1.9); }
+}
+.j-wave { animation: j-wave 900ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Thin custom scrollbars so rails stay instrument-like */
+.j-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(53, 224, 255, 0.28) transparent;
+}
+.j-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
+.j-scroll::-webkit-scrollbar-track { background: transparent; }
+.j-scroll::-webkit-scrollbar-thumb {
+  background: rgba(53, 224, 255, 0.28);
+}
+
+/* Focus is always visible — never removed without replacement */
+:focus-visible {
+  outline: 1px solid var(--j-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .j-scanline,
+  .j-blink,
+  .j-enter,
+  .j-wave {
+    animation: none !important;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- Boot sequence ---------- */
+
+@keyframes j-boot-spark-in {
+  0%   { transform: translate3d(-50%, -50%, 0) scale(0.2); opacity: 0; }
+  40%  { opacity: 1; }
+  100% { transform: translate3d(-50%, -50%, 0) scale(1); opacity: 1; }
+}
+.j-boot-spark { animation: j-boot-spark-in 900ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes j-boot-ring-in {
+  from { transform: scale(0.35); opacity: 0; }
+  60%  { opacity: 0.9; }
+  to   { transform: scale(1); opacity: 0.55; }
+}
+.j-boot-ring { animation: j-boot-ring-in 1200ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes j-boot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(46, 230, 255, 0.35); }
+  50%      { box-shadow: 0 0 0 8px rgba(46, 230, 255, 0); }
+}
+.j-boot-pulse { animation: j-boot-pulse 2.4s ease-out infinite; }
+
+/* Dissolve into the operational environment already rendering beneath. */
+@keyframes j-boot-leave {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(1.06); }
+}
+.j-boot-leave {
+  animation: j-boot-leave 620ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: none;
+}
+
+/* Operational HUD easing in behind the dissolve. */
+@keyframes j-hud-enter {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+.j-hud-enter { animation: j-hud-enter 620ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .j-boot-spark,
+  .j-boot-ring,
+  .j-boot-pulse,
+  .j-boot-leave,
+  .j-hud-enter {
+    animation: none !important;
+  }
+}

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>JARVIS Robustness Fixture</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; }
+        section { margin: 30px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .result { margin-top: 8px; padding: 8px; background: #f0f0f0; border-radius: 3px; min-height: 18px; }
+        a, button { display: inline-block; padding: 8px 12px; }
+    </style>
+</head>
+<body>
+    <h1>JARVIS Interaction Robustness Fixture</h1>
+
+    <!-- A: offscreen clickable -->
+    <section id="section-a">
+        <h2>A. Offscreen Element</h2>
+        <div id="a-result" class="result">not clicked</div>
+    </section>
+
+    <!-- B: overlay-covered -->
+    <section id="section-b" style="position: relative;">
+        <h2>B. Overlay-Covered Element</h2>
+        <a href="#" id="covered-link" onclick="event.preventDefault(); document.getElementById('b-result').textContent='clicked (should not happen while covered)';">Covered Link</a>
+        <div id="overlay" style="position:absolute; inset:0; top:0; background:rgba(0,0,0,0.01); z-index:10;"></div>
+        <div id="b-result" class="result">not clicked</div>
+    </section>
+
+    <!-- C: target replaced after observation -->
+    <section id="section-c">
+        <h2>C. Target Replaced After Observation</h2>
+        <div id="replace-container">
+            <a href="#" id="stale-link" onclick="event.preventDefault();">Stale Link</a>
+        </div>
+        <div id="c-result" class="result">not replaced</div>
+    </section>
+
+    <!-- D: clickable child inside non-clickable wrapper (descendant), and ancestor case -->
+    <section id="section-d">
+        <h2>D. Wrapper / Ancestor Resolution</h2>
+        <div id="wrapper-target" style="pointer-events:none; border:1px dashed #999; padding:10px;">
+            Card text
+            <a href="#" id="child-link" style="pointer-events:auto;" onclick="event.preventDefault(); document.getElementById('d-descendant-result').textContent='child link clicked';">View</a>
+        </div>
+        <div id="d-descendant-result" class="result">not clicked</div>
+
+        <a href="#" id="ancestor-link" onclick="event.preventDefault(); document.getElementById('d-ancestor-result').textContent='ancestor link clicked';">
+            <span id="inner-span" style="width:0; height:0; overflow:hidden; display:inline-block;">Span Text</span>
+        </a>
+        <div id="d-ancestor-result" class="result">not clicked</div>
+    </section>
+
+    <!-- E: new tab -->
+    <section id="section-e">
+        <h2>E. New Tab</h2>
+        <a href="https://example.com/" target="_blank" id="newtab-link">Open New Tab</a>
+    </section>
+
+    <!-- F: lazy-loaded after scroll -->
+    <section id="section-f">
+        <h2>F. Lazy-Loaded Content</h2>
+        <div id="lazy-list">
+            <div class="lazy-card"><a href="#p1">Product One</a> <span>$19.99</span></div>
+            <div class="lazy-card"><a href="#p2">Product Two</a> <span>$29.99</span></div>
+        </div>
+        <div style="height: 1600px;"></div>
+    </section>
+
+    <!-- G: click with no effect -->
+    <section id="section-g">
+        <h2>G. Click With No Effect</h2>
+        <a href="#" id="noop-link" onclick="event.preventDefault();">Does Nothing</a>
+    </section>
+
+    <div style="height: 5000px;"></div>
+    <a href="#" id="offscreen-link" onclick="event.preventDefault(); document.getElementById('a-result').textContent='offscreen link clicked successfully via scroll and click';">Offscreen Link</a>
+
+    <script>
+        // C: replace the stale link with a different element shortly after load.
+        setTimeout(function () {
+            var container = document.getElementById('replace-container');
+            container.innerHTML = '<a href="#" id="fresh-link" onclick="event.preventDefault();">Fresh Link</a>';
+            document.getElementById('c-result').textContent = 'replaced';
+        }, 1200);
+
+        // F: append two more cards once scrolled well past the initial viewport.
+        var lazyLoaded = false;
+        window.addEventListener('scroll', function () {
+            if (lazyLoaded) return;
+            if (window.scrollY > 800) {
+                lazyLoaded = true;
+                var list = document.getElementById('lazy-list');
+                var c3 = document.createElement('div');
+                c3.className = 'lazy-card';
+                c3.innerHTML = '<a href="#p3">Product Three</a> <span>$9.99</span>';
+                var c4 = document.createElement('div');
+                c4.className = 'lazy-card';
+                c4.innerHTML = '<a href="#p4">Product Four</a> <span>$39.99</span>';
+                list.appendChild(c3);
+                list.appendChild(c4);
+            }
+        });
+    </script>
+</body>
+</html>

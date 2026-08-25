@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>JARVIS GS Search</title>
+<style>#results { display: none; }</style></head>
+<body>
+    <h1>Search</h1>
+    <input type="search" id="search-box" placeholder="Search...">
+    <button id="search-btn">Search</button>
+    <div id="results">
+        <h3>Results</h3>
+        <ul>
+            <li><a href="test-fixture-result-detail.html" id="result-1-link">First Result: Matches Your Query</a></li>
+            <li><a href="#result-2" id="result-2-link">Second Result</a></li>
+        </ul>
+    </div>
+    <script>
+        function runSearch() { document.getElementById('results').style.display = 'block'; }
+        document.getElementById('search-btn').addEventListener('click', runSearch);
+        document.getElementById('search-box').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') runSearch();
+        });
+    </script>
+</body>
+</html>
