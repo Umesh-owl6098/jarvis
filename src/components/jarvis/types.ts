@@ -18,9 +18,14 @@ export interface BrowserUiState {
 }
 
 export interface CapabilityUiState {
-  selected: 'read' | 'browser';
+  selected: 'read' | 'browser' | 'gmail';
   reason: string;
   browserFallbackUsed: boolean;
+}
+
+export interface GmailUiState {
+  operation: 'list' | 'search' | 'read' | 'summarize' | 'draft' | 'send';
+  pendingAction?: { recipient: string[]; subject: string; confirmationRequired: true };
 }
 
 export interface PlanSubgoalUiState {
@@ -53,6 +58,7 @@ export interface TaskUiState {
   plan?: PlanUiState;
   goalAnalysis?: GoalAnalysisUiState;
   plannerCalls?: number;
+  gmail?: GmailUiState;
 }
 
 export type { AgentEvent, OmniRouteHealthStatus };

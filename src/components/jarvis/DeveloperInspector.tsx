@@ -48,13 +48,22 @@ export function DeveloperInspector({ task, routerLabel }: DeveloperInspectorProp
         <Row
           label="Capability"
           value={
-            task.capability.selected === 'read'
-              ? 'READ'
-              : task.capability.browserFallbackUsed
-                ? 'BROWSER (read fallback)'
-                : 'BROWSER'
+            task.capability.selected === 'gmail'
+              ? 'GMAIL'
+              : task.capability.selected === 'read'
+                ? 'READ'
+                : task.capability.browserFallbackUsed
+                  ? 'BROWSER (read fallback)'
+                  : 'BROWSER'
           }
         />
+      )}
+      {task.gmail && <Row label="Operation" value={task.gmail.operation.toUpperCase()} />}
+      {task.gmail?.pendingAction && (
+        <>
+          <Row label="Pending action" value={`SEND EMAIL · ${task.gmail.pendingAction.recipient.join(', ')}`} />
+          <Row label="Confirmation" value="REQUIRED" />
+        </>
       )}
       <Row label="Events" value={task.events.length} />
       <Row label="Observe" value={countOf('agent.observing')} />

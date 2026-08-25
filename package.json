@@ -28,7 +28,12 @@
     "omniroute": "omniroute serve --no-open --daemon",
     "test:matrix": "tsx src/scripts/test-command-matrix.ts",
     "bench:planner": "tsx src/scripts/bench-planner-models.ts",
-    "verify:voice-human": "tsx src/scripts/verify-voice-human.ts"
+    "verify:voice-human": "tsx src/scripts/verify-voice-human.ts",
+    "test:gmail-read": "tsx src/scripts/test-checkpoint17-gmail-read.ts",
+    "test:gmail-draft": "tsx src/scripts/test-checkpoint17-gmail-draft.ts",
+    "test:gmail-send": "tsx src/scripts/test-checkpoint17-gmail-send.ts",
+    "test:gmail-security": "tsx src/scripts/test-checkpoint17-gmail-security.ts",
+    "test:gmail-cancellation": "tsx src/scripts/test-checkpoint17-gmail-cancellation.ts"
   },
   "keywords": [],
   "author": "",
@@ -48,6 +53,7 @@
     "dotenv": "^17.4.2",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.1",
+    "googleapis": "^176.0.0",
     "nanoid": "^6.0.1",
     "next": "^16.3.1",
     "omniroute": "^3.8.49",

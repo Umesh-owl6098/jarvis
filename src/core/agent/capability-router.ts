@@ -13,7 +13,15 @@ import type { ReadSource } from '@/core/capabilities/read';
  * existing browser path unchanged — reliability over cleverness.
  */
 
-export type Capability = 'read' | 'browser';
+// Checkpoint 17: 'gmail' exists on this union for type-consistency with
+// ExecutionResult.capability.selected, but routeCapability() itself never
+// returns it — Gmail intent is intercepted in task-manager.ts's runTask()
+// BEFORE decomposeTask/routeCapability even run (see detectGmailIntent in
+// src/core/capabilities/gmail/intent.ts). Gmail operations are single-shot
+// (search/read/summarize/draft/send), not multi-step browser subgoal
+// chains, so they don't need TaskPlan decomposition or this router's own
+// browser-vs-read heuristics at all.
+export type Capability = 'read' | 'browser' | 'gmail';
 
 export interface CapabilityDecision {
   selectedCapability: Capability;

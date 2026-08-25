@@ -331,6 +331,7 @@ export default function Home() {
                   ? { compound: true, objectiveCount: (res as any).taskPlan.subgoals.length }
                   : prev.goalAnalysis,
                 plannerCalls: res.plannerCalls ?? prev.plannerCalls,
+                gmail: (res as any).gmail ?? prev.gmail,
               };
             }
 
@@ -375,6 +376,7 @@ export default function Home() {
             ? { compound: true, objectiveCount: (result as any).taskPlan.subgoals.length }
             : prev!.goalAnalysis,
           plannerCalls: result.plannerCalls ?? prev!.plannerCalls,
+          gmail: (result as any).gmail ?? prev!.gmail,
         }));
       }
     } catch (error) {

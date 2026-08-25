@@ -43,12 +43,23 @@ export interface ExecutionResult {
    * in scripts/tests that bypass task-manager.ts).
    */
   capability?: {
-    selected: 'read' | 'browser';
+    selected: 'read' | 'browser' | 'gmail';
     reason: string;
     fallbackCapability?: 'browser';
     readAttempted: boolean;
     readFailure?: string;
     browserFallbackUsed: boolean;
+  };
+  /**
+   * Checkpoint 17: set only when the Gmail capability handled this task —
+   * which operation ran, and (for a 'draft' operation, or a just-consumed
+   * send confirmation) the pending/consumed action state for observability
+   * (§18). Optional and additive.
+   */
+  gmail?: {
+    operation: 'list' | 'search' | 'read' | 'summarize' | 'draft' | 'send';
+    pendingAction?: { type: 'gmail_send'; recipient: string[]; subject: string; confirmationRequired: true };
+    sentMessageId?: string;
   };
   /**
    * Checkpoint 14: the committed target (if any), for cross-subgoal result
