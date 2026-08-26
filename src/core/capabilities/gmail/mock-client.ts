@@ -84,6 +84,17 @@ const FIXTURE_MESSAGES: MailMessage[] = [
   },
 ];
 
+/**
+ * §CP17.1 privacy fix — mirrors RealGmailClient's format:'metadata' fetch
+ * for list/search results: the full body is never surfaced, only Gmail's
+ * own short snippet (same field formatMessageLine() already displays).
+ * getMessage()/getThread() (read/summarize) are untouched — those return
+ * the real .text on purpose, since the user explicitly asked to read it.
+ */
+function redactToSnippet(m: MailMessage): MailMessage {
+  return { ...m, text: m.snippet };
+}
+
 /** Deterministic, in-memory, per-process only — never persisted, never real network I/O. */
 export class MockGmailClient implements GmailClient {
   readonly backend = 'mock' as const;
@@ -93,7 +104,7 @@ export class MockGmailClient implements GmailClient {
 
   async listRecent(max: number, signal?: AbortSignal): Promise<MailMessage[]> {
     if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
-    return [...this.messages].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, max);
+    return [...this.messages].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, max).map(redactToSnippet);
   }
 
   async search(query: string, max: number, signal?: AbortSignal): Promise<MailSearchResult> {
@@ -107,10 +118,14 @@ export class MockGmailClient implements GmailClient {
     // that genuinely matches every term.
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     const matched = this.messages.filter((m) => {
+      // Matching still searches the FULL body (mirrors real Gmail's own
+      // full-text search) — only the RETURNED objects are redacted below,
+      // same as the real client's format:'metadata' fetch never pulling
+      // body text in the first place while its query still full-text matches.
       const haystack = `${m.from} ${m.to.join(' ')} ${m.subject} ${m.text}`.toLowerCase();
       return terms.every((term) => haystack.includes(term));
     });
-    return { query, messages: matched.slice(0, max), resultSizeEstimate: matched.length };
+    return { query, messages: matched.slice(0, max).map(redactToSnippet), resultSizeEstimate: matched.length };
   }
 
   async getMessage(id: string, signal?: AbortSignal): Promise<MailMessage | null> {

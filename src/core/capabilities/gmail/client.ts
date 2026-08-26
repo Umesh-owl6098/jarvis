@@ -89,22 +89,31 @@ export class RealGmailClient implements GmailClient {
     this.gmail = google.gmail({ version: 'v1', auth });
   }
 
+  // §CP17.1 privacy fix — list/search fetch 'metadata' (headers + Gmail's
+  // own short snippet), never the full body: MailMessage.text for these
+  // results falls back to the snippet (see toMailMessage's `|| msg.snippet`),
+  // the same short preview formatMessageLine() already displays. This isn't
+  // just a display-layer filter — the full body is never pulled over the
+  // wire or held in memory for a list/search result at all, so there's
+  // nothing for a future code path, log line, or Developer Inspector to
+  // accidentally surface. getMessage()/getThread() (the 'read'/'summarize'
+  // operations, which the user explicitly asked for) still fetch 'full'.
   async listRecent(max: number, signal?: AbortSignal): Promise<MailMessage[]> {
     const list = await this.gmail.users.messages.list({ userId: 'me', maxResults: max }, { signal });
-    return this.hydrate(list.data.messages ?? [], signal);
+    return this.hydrate(list.data.messages ?? [], 'metadata', signal);
   }
 
   async search(query: string, max: number, signal?: AbortSignal): Promise<MailSearchResult> {
     const list = await this.gmail.users.messages.list({ userId: 'me', q: query, maxResults: max }, { signal });
-    const messages = await this.hydrate(list.data.messages ?? [], signal);
+    const messages = await this.hydrate(list.data.messages ?? [], 'metadata', signal);
     return { query, messages, resultSizeEstimate: list.data.resultSizeEstimate ?? messages.length };
   }
 
-  private async hydrate(refs: gmail_v1.Schema$Message[], signal?: AbortSignal): Promise<MailMessage[]> {
+  private async hydrate(refs: gmail_v1.Schema$Message[], format: 'metadata' | 'full', signal?: AbortSignal): Promise<MailMessage[]> {
     const full = await Promise.all(
       refs
         .filter((r) => r.id)
-        .map((r) => this.gmail.users.messages.get({ userId: 'me', id: r.id!, format: 'full' }, { signal }))
+        .map((r) => this.gmail.users.messages.get({ userId: 'me', id: r.id!, format }, { signal }))
     );
     return full.map((r) => toMailMessage(r.data));
   }
