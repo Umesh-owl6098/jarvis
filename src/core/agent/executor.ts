@@ -43,7 +43,7 @@ export interface ExecutionResult {
    * in scripts/tests that bypass task-manager.ts).
    */
   capability?: {
-    selected: 'read' | 'browser' | 'gmail';
+    selected: 'read' | 'browser' | 'gmail' | 'calendar';
     reason: string;
     fallbackCapability?: 'browser';
     readAttempted: boolean;
@@ -60,6 +60,17 @@ export interface ExecutionResult {
     operation: 'list' | 'search' | 'read' | 'summarize' | 'draft' | 'send';
     pendingAction?: { type: 'gmail_send'; recipient: string[]; subject: string; confirmationRequired: true };
     sentMessageId?: string;
+  };
+  /**
+   * Checkpoint 18: set only when the Calendar capability handled this task
+   * — which operation ran, and (for a proposal, or a just-consumed
+   * confirmation) the pending action state for observability. Optional and
+   * additive, same shape discipline as `gmail` above.
+   */
+  calendar?: {
+    operation: 'list' | 'search' | 'freebusy' | 'propose_create' | 'propose_update' | 'propose_cancel' | 'create' | 'update' | 'delete';
+    pendingAction?: { type: 'calendar_create' | 'calendar_update' | 'calendar_delete'; title: string; start: string; confirmationRequired: true };
+    resultEventId?: string;
   };
   /**
    * Checkpoint 14: the committed target (if any), for cross-subgoal result

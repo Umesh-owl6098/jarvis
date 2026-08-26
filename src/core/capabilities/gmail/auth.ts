@@ -39,7 +39,14 @@ export const GMAIL_SCOPES = [
 // single-user local dev tool (same idea as `gh`/`gcloud`'s own local
 // credential files). No database needed for this, matching §10's own "no
 // database needed yet" philosophy applied to the token store too.
-const TOKEN_PATH = path.join(process.cwd(), '.gmail-token.json');
+//
+// Checkpoint 18: this ONE token file is shared by Gmail AND Calendar — it's
+// really "the Google account token for this app," not something inherently
+// Gmail-only. TOKEN_PATH/saveTokens/loadTokens are exported so
+// calendar/auth.ts can reuse this exact file/logic instead of duplicating
+// it (§2's "do not create a completely separate OAuth stack"). Nothing
+// about their behavior changes for Gmail's own callers.
+export const TOKEN_PATH = path.join(process.cwd(), '.gmail-token.json');
 
 export function isGmailOAuthConfigured(): boolean {
   return !!(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET);
@@ -58,12 +65,22 @@ export function createOAuthClient(): OAuth2Client {
   return new google.auth.OAuth2(process.env.GMAIL_CLIENT_ID, process.env.GMAIL_CLIENT_SECRET, getRedirectUri());
 }
 
-export function getAuthUrl(): string {
+/**
+ * §CP18 — extraScopes/includeGrantedScopes are additive-only parameters:
+ * every existing call site (Gmail's own /api/auth/gmail route) calls this
+ * with no arguments and gets EXACTLY the same URL/behavior as before.
+ * Calendar's incremental-auth flow calls getAuthUrl(CALENDAR_SCOPES, true)
+ * — include_granted_scopes:true is what makes Google issue a token
+ * covering the UNION of the previously-granted Gmail scopes plus the newly
+ * requested Calendar ones, rather than silently dropping Gmail access.
+ */
+export function getAuthUrl(extraScopes: string[] = [], includeGrantedScopes = false): string {
   const client = createOAuthClient();
   return client.generateAuthUrl({
     access_type: 'offline', // required to receive a refresh_token
     prompt: 'consent', // forces a refresh_token on every authorization, not just the first
-    scope: GMAIL_SCOPES,
+    scope: [...GMAIL_SCOPES, ...extraScopes],
+    include_granted_scopes: includeGrantedScopes,
   });
 }
 
@@ -73,11 +90,11 @@ export async function exchangeCodeForTokens(code: string): Promise<void> {
   saveTokens(tokens);
 }
 
-function saveTokens(tokens: Credentials): void {
+export function saveTokens(tokens: Credentials): void {
   writeFileSync(TOKEN_PATH, JSON.stringify(tokens, null, 2), { mode: 0o600 });
 }
 
-function loadTokens(): Credentials | null {
+export function loadTokens(): Credentials | null {
   if (!existsSync(TOKEN_PATH)) return null;
   try {
     return JSON.parse(readFileSync(TOKEN_PATH, 'utf-8'));

@@ -18,7 +18,7 @@ export interface BrowserUiState {
 }
 
 export interface CapabilityUiState {
-  selected: 'read' | 'browser' | 'gmail';
+  selected: 'read' | 'browser' | 'gmail' | 'calendar';
   reason: string;
   browserFallbackUsed: boolean;
 }
@@ -26,6 +26,11 @@ export interface CapabilityUiState {
 export interface GmailUiState {
   operation: 'list' | 'search' | 'read' | 'summarize' | 'draft' | 'send';
   pendingAction?: { recipient: string[]; subject: string; confirmationRequired: true };
+}
+
+export interface CalendarUiState {
+  operation: 'list' | 'search' | 'freebusy' | 'propose_create' | 'propose_update' | 'propose_cancel' | 'create' | 'update' | 'delete';
+  pendingAction?: { type: 'calendar_create' | 'calendar_update' | 'calendar_delete'; title: string; start: string; confirmationRequired: true };
 }
 
 export interface PlanSubgoalUiState {
@@ -59,6 +64,7 @@ export interface TaskUiState {
   goalAnalysis?: GoalAnalysisUiState;
   plannerCalls?: number;
   gmail?: GmailUiState;
+  calendar?: CalendarUiState;
 }
 
 export type { AgentEvent, OmniRouteHealthStatus };

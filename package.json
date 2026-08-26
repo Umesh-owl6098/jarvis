@@ -33,7 +33,12 @@
     "test:gmail-draft": "tsx src/scripts/test-checkpoint17-gmail-draft.ts",
     "test:gmail-send": "tsx src/scripts/test-checkpoint17-gmail-send.ts",
     "test:gmail-security": "tsx src/scripts/test-checkpoint17-gmail-security.ts",
-    "test:gmail-cancellation": "tsx src/scripts/test-checkpoint17-gmail-cancellation.ts"
+    "test:gmail-cancellation": "tsx src/scripts/test-checkpoint17-gmail-cancellation.ts",
+    "test:calendar-read": "tsx src/scripts/test-checkpoint18-calendar-read.ts",
+    "test:calendar-propose": "tsx src/scripts/test-checkpoint18-calendar-propose.ts",
+    "test:calendar-update-delete": "tsx src/scripts/test-checkpoint18-calendar-update-delete.ts",
+    "test:calendar-security": "tsx src/scripts/test-checkpoint18-calendar-security.ts",
+    "test:calendar-cancellation": "tsx src/scripts/test-checkpoint18-calendar-cancellation.ts"
   },
   "keywords": [],
   "author": "",

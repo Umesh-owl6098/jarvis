@@ -19,6 +19,16 @@ import { detectGmailIntent, isSendConfirmationPhrase, isUnambiguousSendPhrase, i
 import { runGmailIntent } from '@/core/capabilities/gmail/runner';
 import { getGmailClient, gmailAvailability } from '@/core/capabilities/gmail/resolve';
 import { pendingActionStore } from '@/core/capabilities/gmail/pending-action';
+import {
+  detectCalendarIntent,
+  unambiguousCalendarPhraseType,
+  isAmbiguousCalendarConfirmPhrase,
+  isCalendarRejectPhrase,
+} from '@/core/capabilities/calendar/intent';
+import { runCalendarIntent } from '@/core/capabilities/calendar/runner';
+import { getCalendarClient, calendarAvailability } from '@/core/capabilities/calendar/resolve';
+import { calendarPendingActionStore, type CalendarPendingActionType } from '@/core/capabilities/calendar/pending-action';
+import { formatLocal } from '@/core/capabilities/calendar/datetime';
 
 export interface RunTaskOptions {
   goal: string;
@@ -136,6 +146,158 @@ async function attemptGmailSendConfirmation(goal: string, taskId: string, onEven
 }
 
 /**
+ * Checkpoint 18 §9-10 — the Calendar analogue of attemptGmailSendConfirmation.
+ * Same discipline: claim() is the atomic idempotency guard, the actual
+ * mutation call (create/update/delete) is the ONLY place a real Calendar
+ * state change happens, and an abort is only ever honored if the client
+ * itself throws BEFORE that mutation is accepted — never claimed after.
+ */
+async function attemptCalendarConfirmation(goal: string, taskId: string, onEvent: EventListener, signal?: AbortSignal): Promise<ExecutionResult> {
+  onEvent({ type: 'task.started', timestamp: Date.now(), taskId, data: { task: goal, capability: 'calendar' } });
+
+  const action = calendarPendingActionStore.claim();
+  if (!action) {
+    // Nothing was pending, so there's no way to know which operation the
+    // stale/repeat phrase would have confirmed — omitting `calendar`
+    // entirely is honest here; inventing an operation type would not be.
+    const resultText = 'There is no pending calendar action waiting to be confirmed (it may have already been completed, cancelled, or expired) — nothing changed.';
+    onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'calendar' } });
+    return {
+      taskId, goal, status: 'success', outcome: 'completed', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [],
+      capability: { selected: 'calendar', reason: 'Confirmation phrase with no active pending calendar action.', readAttempted: false, browserFallbackUsed: false },
+    };
+  }
+
+  try {
+    const client = getCalendarClient();
+    let resultText: string;
+    let operation: 'create' | 'update' | 'delete';
+    let resultEventId: string | undefined;
+
+    if (action.type === 'calendar_create') {
+      operation = 'create';
+      const event = await client.createEvent(action.proposal, signal);
+      resultEventId = event.id;
+      resultText = `Created "${event.title}" — ${formatLocal(event.start, event.timezone)} to ${formatLocal(event.end, event.timezone)}.`;
+    } else if (action.type === 'calendar_update') {
+      operation = 'update';
+      const event = await client.updateEvent(action.proposal.existingEventId!, action.proposal, signal);
+      resultEventId = event.id;
+      resultText = `Updated "${event.title}" — now ${formatLocal(event.start, event.timezone)} to ${formatLocal(event.end, event.timezone)}.`;
+    } else {
+      operation = 'delete';
+      await client.deleteEvent(action.proposal.existingEventId!, signal);
+      resultText = `Cancelled "${action.proposal.title}".`;
+    }
+
+    onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'calendar' } });
+    return {
+      taskId, goal, status: 'success', outcome: 'completed', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [`calendar:${operation} (${action.proposal.existingEventId ?? 'new'})`], events: [],
+      capability: { selected: 'calendar', reason: 'Explicit confirmation matched a pending Calendar action.', readAttempted: false, browserFallbackUsed: false },
+      calendar: { operation, resultEventId },
+    };
+  } catch (e: any) {
+    const aborted = e?.name === 'AbortError' || signal?.aborted;
+    const resultText = aborted
+      ? 'Cancelled before the calendar change was accepted — nothing changed.'
+      : `Failed to apply the confirmed calendar action: ${e?.message ?? 'unknown error'}`;
+    onEvent(aborted
+      ? { type: 'task.stopped', timestamp: Date.now(), taskId, data: { reason: 'user_cancelled' } }
+      : { type: 'agent.failed', timestamp: Date.now(), taskId, data: { reason: resultText } });
+    return {
+      taskId, goal, status: aborted ? 'stopped' : 'failed', outcome: aborted ? undefined : 'failed', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [], error: aborted ? undefined : resultText,
+      capability: { selected: 'calendar', reason: aborted ? 'Calendar action cancelled before it was accepted.' : 'Confirmed but the calendar call itself failed.', readAttempted: false, browserFallbackUsed: false },
+    };
+  }
+}
+
+/**
+ * Checkpoint 18 §4-8 — the Calendar capability path. Every branch here is
+ * read-only or proposal-only; createEvent/updateEvent/deleteEvent are never
+ * reachable from this function (see attemptCalendarConfirmation above for
+ * the ONLY mutation path).
+ */
+async function attemptCalendar(goal: string, taskId: string, onEvent: EventListener, signal?: AbortSignal): Promise<ExecutionResult> {
+  onEvent({ type: 'task.started', timestamp: Date.now(), taskId, data: { task: goal, capability: 'calendar' } });
+
+  const availability = calendarAvailability();
+  if (!availability.available) {
+    const resultText = availability.reason;
+    onEvent({ type: 'agent.failed', timestamp: Date.now(), taskId, data: { reason: resultText } });
+    return {
+      taskId, goal, status: 'failed', outcome: 'failed', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [], error: resultText,
+      capability: { selected: 'calendar', reason: 'Calendar capability matched but is not yet authorized.', readAttempted: false, browserFallbackUsed: false },
+    };
+  }
+
+  if (signal?.aborted) {
+    const resultText = 'Cancelled by user.';
+    onEvent({ type: 'task.stopped', timestamp: Date.now(), taskId, data: { reason: 'user_cancelled' } });
+    return {
+      taskId, goal, status: 'stopped', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [],
+      capability: { selected: 'calendar', reason: 'Cancelled before the Calendar operation started.', readAttempted: false, browserFallbackUsed: false },
+    };
+  }
+
+  const intent = detectCalendarIntent(goal)!; // caller already confirmed this is non-null
+  try {
+    const client = getCalendarClient();
+    const outcome = await runCalendarIntent(intent, client, signal);
+
+    if (outcome.status === 'stopped') {
+      onEvent({ type: 'task.stopped', timestamp: Date.now(), taskId, data: { reason: 'user_cancelled' } });
+      return {
+        taskId, goal, status: 'stopped', result: outcome.resultText,
+        steps: 0, tokensUsed: 0, actions: [`calendar:${intent.operation}`], events: [],
+        capability: { selected: 'calendar', reason: 'Cancelled during the Calendar operation.', readAttempted: false, browserFallbackUsed: false },
+        calendar: { operation: intent.operation },
+      };
+    }
+
+    let pendingAction: { type: CalendarPendingActionType; title: string; start: string; confirmationRequired: true } | undefined;
+    if (outcome.proposalCreated) {
+      const type: CalendarPendingActionType =
+        outcome.proposalCreated.kind === 'create' ? 'calendar_create' : outcome.proposalCreated.kind === 'update' ? 'calendar_update' : 'calendar_delete';
+      const created = calendarPendingActionStore.set({ type, proposal: outcome.proposalCreated.proposal, createdAt: Date.now() });
+      pendingAction = { type, title: created.proposal.title, start: created.proposal.start, confirmationRequired: true };
+    }
+
+    const eventType = outcome.status === 'completed' ? 'agent.completed' : 'agent.failed';
+    onEvent({ type: eventType, timestamp: Date.now(), taskId, data: { result: outcome.resultText, capability: 'calendar' } });
+
+    return {
+      taskId,
+      goal,
+      status: outcome.status === 'completed' ? 'success' : 'failed',
+      outcome: outcome.status === 'completed' ? 'completed' : outcome.status === 'blocked' ? 'blocked' : 'failed',
+      result: outcome.resultText,
+      steps: 0,
+      tokensUsed: 0,
+      actions: [`calendar:${intent.operation}`],
+      events: [],
+      capability: { selected: 'calendar', reason: `Task names a Calendar ${intent.operation} operation.`, readAttempted: false, browserFallbackUsed: false },
+      calendar: { operation: intent.operation, pendingAction },
+    };
+  } catch (e: any) {
+    const aborted = e?.name === 'AbortError' || signal?.aborted;
+    const resultText = aborted ? 'Cancelled by user.' : `Calendar operation failed: ${e?.message ?? 'unknown error'}`;
+    onEvent(aborted
+      ? { type: 'task.stopped', timestamp: Date.now(), taskId, data: { reason: 'user_cancelled' } }
+      : { type: 'agent.failed', timestamp: Date.now(), taskId, data: { reason: resultText } });
+    return {
+      taskId, goal, status: aborted ? 'stopped' : 'failed', outcome: aborted ? undefined : 'failed', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [], error: aborted ? undefined : resultText,
+      capability: { selected: 'calendar', reason: aborted ? 'Cancelled during the Calendar operation.' : 'Calendar operation threw.', readAttempted: false, browserFallbackUsed: false },
+    };
+  }
+}
+
+/**
  * Checkpoint 17 §6-8 — the Gmail capability path. Every non-send operation
  * here is read-only or draft-only; sendDraft() is never reachable from this
  * function (see attemptGmailSendConfirmation above for the ONLY send path).
@@ -226,40 +388,85 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   const { goal, onEvent, signal, taskId: providedTaskId } = options;
   console.log(`[integrity] runTask.task=${JSON.stringify(goal)} len=${goal.length}`);
 
-  // Checkpoint 17 §9 — an UNAMBIGUOUS send phrase ("send it", "send the
-  // email") is checked regardless of whether anything is currently
-  // pending — its own vocabulary names sending an email, so a STALE or
-  // REPEATED confirmation (already consumed, expired, or nothing was ever
-  // drafted) still gets an honest, Gmail-scoped "nothing pending" answer
-  // from attemptGmailSendConfirmation itself, instead of silently falling
-  // through to unrelated browser routing (which previously misrouted a
-  // second "Send it." after the first one succeeded — caught via the
-  // idempotency/double-confirmation tests). An AMBIGUOUS bare word ("yes",
-  // "confirm") is only ever treated as a send confirmation when a
-  // non-expired PendingAction genuinely exists — pendingActionStore.active()
-  // is the single source of truth there, never inferred from history.
-  if (isUnambiguousSendPhrase(goal) || (pendingActionStore.active() && isSendConfirmationPhrase(goal))) {
+  // Checkpoint 17/18 §9 — UNAMBIGUOUS phrases ("send it" / "create it",
+  // "update it", "cancel it") are checked regardless of whether anything is
+  // currently pending — their own vocabulary names the action, so a STALE
+  // or REPEATED confirmation still gets an honest "nothing pending" answer
+  // instead of silently falling through to unrelated browser routing.
+  // Gmail's and Calendar's unambiguous vocabularies are disjoint by design
+  // (send/send the email vs. create/update/cancel it) so these two checks
+  // can never collide.
+  const calendarPhraseType = unambiguousCalendarPhraseType(goal);
+  if (calendarPhraseType) {
+    const taskId = providedTaskId || nanoid();
+    return attemptCalendarConfirmation(goal, taskId, onEvent, signal);
+  }
+  if (isUnambiguousSendPhrase(goal)) {
     const taskId = providedTaskId || nanoid();
     return attemptGmailSendConfirmation(goal, taskId, onEvent, signal);
   }
-  if (pendingActionStore.active()) {
-    if (isSendCancelPhrase(goal)) {
-      pendingActionStore.clear();
+
+  // AMBIGUOUS bare words ("yes", "confirm", "go ahead") share vocabulary
+  // across Gmail and Calendar by necessity — only ever treated as a
+  // confirmation when EXACTLY ONE of the two pending stores is active; if
+  // both happen to be active at once (rare — two different capabilities
+  // mid-confirmation simultaneously), a bare word is genuinely ambiguous
+  // and is NOT resolved here — §6/§9's "do not guess" applies to which
+  // capability it refers to, not just to dates/times.
+  const gmailPendingActive = !!pendingActionStore.active();
+  const calendarPendingActive = !!calendarPendingActionStore.active();
+  if (isAmbiguousCalendarConfirmPhrase(goal) || isSendConfirmationPhrase(goal)) {
+    if (calendarPendingActive && !gmailPendingActive) {
       const taskId = providedTaskId || nanoid();
-      const resultText = 'Cancelled — the draft was not sent.';
-      onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'gmail' } });
-      return {
-        taskId, goal, status: 'success', outcome: 'completed', result: resultText,
-        steps: 0, tokensUsed: 0, actions: [], events: [],
-        capability: { selected: 'gmail', reason: 'Explicit cancellation of a pending Gmail send.', readAttempted: false, browserFallbackUsed: false },
-        gmail: { operation: 'send' },
-      };
+      return attemptCalendarConfirmation(goal, taskId, onEvent, signal);
     }
-    // Any other new task text is NOT authorization to send — §9's "do not
-    // carry send authorization across unrelated turns" — falls through to
-    // normal routing below. The pending action stays intact (not cleared)
-    // so a genuine confirmation can still arrive on a LATER turn within
-    // its TTL; only an explicit cancel or the TTL itself clears it.
+    if (gmailPendingActive && !calendarPendingActive) {
+      const taskId = providedTaskId || nanoid();
+      return attemptGmailSendConfirmation(goal, taskId, onEvent, signal);
+    }
+    // both or neither active — fall through; neither capability claims an
+    // ambiguous bare word it can't uniquely resolve.
+  }
+
+  // Explicit rejection phrases similarly share some vocabulary ("no",
+  // "stop", "never mind") — same exactly-one-active tiebreak.
+  if (isCalendarRejectPhrase(goal) && calendarPendingActive && !gmailPendingActive) {
+    calendarPendingActionStore.clear();
+    const taskId = providedTaskId || nanoid();
+    const resultText = 'Cancelled — the calendar change was not made.';
+    onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'calendar' } });
+    return {
+      taskId, goal, status: 'success', outcome: 'completed', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [],
+      capability: { selected: 'calendar', reason: 'Explicit cancellation of a pending Calendar action.', readAttempted: false, browserFallbackUsed: false },
+    };
+  }
+  if (isSendCancelPhrase(goal) && gmailPendingActive && !calendarPendingActive) {
+    pendingActionStore.clear();
+    const taskId = providedTaskId || nanoid();
+    const resultText = 'Cancelled — the draft was not sent.';
+    onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'gmail' } });
+    return {
+      taskId, goal, status: 'success', outcome: 'completed', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [],
+      capability: { selected: 'gmail', reason: 'Explicit cancellation of a pending Gmail send.', readAttempted: false, browserFallbackUsed: false },
+      gmail: { operation: 'send' },
+    };
+  }
+  // Any other new task text while something is pending is NOT authorization
+  // to act — §9's "do not carry confirmation across unrelated turns" —
+  // falls through to normal routing below. Pending actions stay intact
+  // (not cleared) so a genuine confirmation can still arrive on a LATER
+  // turn within its TTL; only an explicit reject or the TTL itself clears it.
+
+  // Checkpoint 18 §7 — Calendar intent is checked before Gmail's and before
+  // subgoal decomposition, for the same reason Gmail's own check runs
+  // early: Calendar operations are single-shot, not multi-step browser
+  // chains, and have nothing to do with classifyGoal's navigation types.
+  const calendarIntent = detectCalendarIntent(goal);
+  if (calendarIntent) {
+    const taskId = providedTaskId || nanoid();
+    return attemptCalendar(goal, taskId, onEvent, signal);
   }
 
   // Checkpoint 17 §6 — Gmail intent is checked before subgoal decomposition

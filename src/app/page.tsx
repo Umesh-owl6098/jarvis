@@ -332,6 +332,7 @@ export default function Home() {
                   : prev.goalAnalysis,
                 plannerCalls: res.plannerCalls ?? prev.plannerCalls,
                 gmail: (res as any).gmail ?? prev.gmail,
+                calendar: (res as any).calendar ?? prev.calendar,
               };
             }
 
@@ -377,6 +378,7 @@ export default function Home() {
             : prev!.goalAnalysis,
           plannerCalls: result.plannerCalls ?? prev!.plannerCalls,
           gmail: (result as any).gmail ?? prev!.gmail,
+          calendar: (result as any).calendar ?? prev!.calendar,
         }));
       }
     } catch (error) {

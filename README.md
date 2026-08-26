@@ -10,11 +10,12 @@ Autonomous web agent with voice/text commands, hybrid read/browser execution, go
 - Server-Sent Events (SSE) for live task streaming
 - React Three Fiber / Three.js for the execution UI
 - Deterministic browser skills (navigation, search, extraction, interaction)
-- CapabilityRouter (read vs. browser vs. Gmail capability selection)
+- CapabilityRouter (read vs. browser vs. Gmail vs. Calendar capability selection)
 - Structured page/content understanding
 - TaskProgress / TaskPlan (goal evaluation and multi-step subgoal execution)
 - Voice input
 - Gmail (OAuth-authorized read/search/summarize/draft, with explicit confirmation required before any send — see [GMAIL_SETUP.md](GMAIL_SETUP.md))
+- Calendar (OAuth-authorized read/search/free-busy, with explicit confirmation required before any create/update/cancel — see [CALENDAR_SETUP.md](CALENDAR_SETUP.md))
 
 ## Local startup
 
