@@ -136,7 +136,13 @@ export function detectGmailIntent(task: string): GmailIntent | null {
   }
 
   if (LIST_RE.test(t)) {
-    return { operation: 'list', raw: t, max: 5 };
+    // §17.1 live test caught this: "Show my latest 3 emails" was silently
+    // returning 5 — the user's own explicit count was parsed nowhere.
+    // Any digit in the request is used as the count; otherwise default 5.
+    const countMatch = /\b(\d+)\b/.exec(t);
+    const requested = countMatch ? parseInt(countMatch[1], 10) : 5;
+    const max = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 50) : 5;
+    return { operation: 'list', raw: t, max };
   }
 
   const summarizeMatch = SUMMARIZE_RE.exec(t);
