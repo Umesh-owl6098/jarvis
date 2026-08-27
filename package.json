@@ -45,7 +45,14 @@
     "test:gmail-contacts-extra": "tsx src/scripts/test-checkpoint19-gmail-contacts-extra.ts",
     "test:calendar-contacts": "tsx src/scripts/test-checkpoint19-calendar-contacts.ts",
     "test:calendar-contacts-extra": "tsx src/scripts/test-checkpoint19-calendar-contacts-extra.ts",
-    "test:voice-contacts": "tsx src/scripts/test-checkpoint19-voice-contacts.ts"
+    "test:voice-contacts": "tsx src/scripts/test-checkpoint19-voice-contacts.ts",
+    "test:tasks-read": "tsx src/scripts/test-checkpoint20-tasks-read.ts",
+    "test:tasks-crud": "tsx src/scripts/test-checkpoint20-tasks-crud.ts",
+    "test:tasks-security": "tsx src/scripts/test-checkpoint20-tasks-security.ts",
+    "test:tasks-cancellation": "tsx src/scripts/test-checkpoint20-tasks-cancellation.ts",
+    "test:tasks-routing": "tsx src/scripts/test-checkpoint20-routing.ts",
+    "test:voice-tasks": "tsx src/scripts/test-checkpoint20-voice-tasks.ts",
+    "test:tasks-plural-regression": "tsx src/scripts/test-checkpoint20-tasks-plural-regression.ts"
   },
   "keywords": [],
   "author": "",

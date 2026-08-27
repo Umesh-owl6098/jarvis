@@ -13,14 +13,15 @@ import type { ReadSource } from '@/core/capabilities/read';
  * existing browser path unchanged — reliability over cleverness.
  */
 
-// Checkpoint 17/18: 'gmail'/'calendar' exist on this union for
+// Checkpoint 17/18/20: 'gmail'/'calendar'/'tasks' exist on this union for
 // type-consistency with ExecutionResult.capability.selected, but
-// routeCapability() itself never returns either — both are intercepted in
-// task-manager.ts's runTask() BEFORE decomposeTask/routeCapability even run
-// (see detectGmailIntent/detectCalendarIntent). Both are single-shot
-// operations, not multi-step browser subgoal chains, so neither needs
-// TaskPlan decomposition or this router's own browser-vs-read heuristics.
-export type Capability = 'read' | 'browser' | 'gmail' | 'calendar';
+// routeCapability() itself never returns any of them — all three are
+// intercepted in task-manager.ts's runTask() BEFORE decomposeTask/
+// routeCapability even run (see detectGmailIntent/detectCalendarIntent/
+// detectTasksIntent). All are single-shot operations, not multi-step
+// browser subgoal chains, so none needs TaskPlan decomposition or this
+// router's own browser-vs-read heuristics.
+export type Capability = 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks';
 
 export interface CapabilityDecision {
   selectedCapability: Capability;

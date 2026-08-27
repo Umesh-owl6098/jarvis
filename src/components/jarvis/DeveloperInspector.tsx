@@ -52,11 +52,13 @@ export function DeveloperInspector({ task, routerLabel }: DeveloperInspectorProp
               ? 'GMAIL'
               : task.capability.selected === 'calendar'
                 ? 'CALENDAR'
-                : task.capability.selected === 'read'
-                  ? 'READ'
-                  : task.capability.browserFallbackUsed
-                    ? 'BROWSER (read fallback)'
-                    : 'BROWSER'
+                : task.capability.selected === 'tasks'
+                  ? 'TASKS'
+                  : task.capability.selected === 'read'
+                    ? 'READ'
+                    : task.capability.browserFallbackUsed
+                      ? 'BROWSER (read fallback)'
+                      : 'BROWSER'
           }
         />
       )}
@@ -73,6 +75,16 @@ export function DeveloperInspector({ task, routerLabel }: DeveloperInspectorProp
           <Row
             label="Pending action"
             value={`${task.calendar.pendingAction.type.replace('calendar_', '').toUpperCase()} EVENT · ${task.calendar.pendingAction.title}`}
+          />
+          <Row label="Confirmation" value="REQUIRED" />
+        </>
+      )}
+      {task.tasks && <Row label="Operation" value={task.tasks.operation.toUpperCase()} />}
+      {task.tasks?.pendingAction && (
+        <>
+          <Row
+            label="Pending action"
+            value={`${task.tasks.pendingAction.type.replace('tasks_', '').toUpperCase()} TASK · ${task.tasks.pendingAction.title}`}
           />
           <Row label="Confirmation" value="REQUIRED" />
         </>

@@ -18,7 +18,7 @@ export interface BrowserUiState {
 }
 
 export interface CapabilityUiState {
-  selected: 'read' | 'browser' | 'gmail' | 'calendar';
+  selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks';
   reason: string;
   browserFallbackUsed: boolean;
 }
@@ -31,6 +31,11 @@ export interface GmailUiState {
 export interface CalendarUiState {
   operation: 'list' | 'search' | 'freebusy' | 'propose_create' | 'propose_update' | 'propose_cancel' | 'create' | 'update' | 'delete';
   pendingAction?: { type: 'calendar_create' | 'calendar_update' | 'calendar_delete'; title: string; start: string; confirmationRequired: true };
+}
+
+export interface TasksUiState {
+  operation: 'list_lists' | 'list' | 'search' | 'propose_create' | 'propose_update' | 'propose_complete' | 'propose_delete' | 'create' | 'update' | 'complete' | 'delete';
+  pendingAction?: { type: 'tasks_create' | 'tasks_update' | 'tasks_complete' | 'tasks_delete'; title: string; due?: string; confirmationRequired: true };
 }
 
 export interface ResolutionUiState {
@@ -71,6 +76,7 @@ export interface TaskUiState {
   plannerCalls?: number;
   gmail?: GmailUiState;
   calendar?: CalendarUiState;
+  tasks?: TasksUiState;
   resolution?: ResolutionUiState;
 }
 

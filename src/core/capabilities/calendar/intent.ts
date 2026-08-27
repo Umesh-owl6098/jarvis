@@ -17,6 +17,7 @@ import {
   type DayPart,
 } from './datetime';
 import type { CalendarPendingActionType } from './pending-action';
+import { GMAIL_EMAIL_VERB_RE } from '@/core/capabilities/shared/gmail-guard';
 
 export type CalendarOperation = 'list' | 'search' | 'freebusy' | 'propose_create' | 'propose_update' | 'propose_cancel';
 
@@ -53,16 +54,6 @@ const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w-]+/g;
 
 const CALENDAR_WEBSITE_NAV_RE = /\b(?:open|go to|navigate to|visit)\s+(?:calendar\.google\.com|google\s+calendar)\b/i;
 
-// Checkpoint 19 — an explicit Gmail draft/send verb phrase always belongs to
-// Gmail, even when the message BODY happens to contain calendar-sounding
-// words. Caught live: "Draft an email to John Smith saying are you free
-// today" tripped FREEBUSY_RE below (a plain substring match with no
-// awareness that "are you free" was quoted inside a "saying ..." email
-// body), sending an explicit Gmail draft request to Calendar instead. This
-// guard mirrors GMAIL_WEBSITE_NAV_RE's own defensive top-of-function check
-// in gmail/intent.ts, just in the opposite direction.
-const GMAIL_EMAIL_VERB_RE = /\b(?:draft|write|compose|send|reply|forward)\b.{0,20}\b(?:an?\s+)?(?:email|message)\b/i;
-
 // "calendar" is included alongside the generic nouns (not a full
 // noun-requirement removal, unlike CREATE_VERB_RE — "cancel"/"delete"/
 // "remove" are common English verbs used in plenty of non-calendar
@@ -82,7 +73,14 @@ const UPDATE_VERB_RE = /\b(?:move|reschedule|change)\b.{0,40}\b(?:appointment|ev
 const CREATE_VERB_RE = /\b(?:schedule|create|book|set up)\b\s+(?:an?\s+)?\S/i;
 const FREEBUSY_RE = /\b(?:am i free|are you free|is .+ free|free at|available at|do i have.*free)\b/i;
 const LIST_TODAY_RE = /\bwhat(?:'s| is| do i have)\b.{0,20}\b(today|tomorrow)\b|\b(today|tomorrow)\b.{0,20}\bschedule\b|\bmy schedule\b/i;
-const SEARCH_RE = /\bfind\b.{0,10}\bmy\b\s+(.+?)\s*(?:appointment|event|meeting)?$/i;
+// Checkpoint 20 — the trailing noun is now REQUIRED, not optional: caught
+// live, "Find my report task" (a Tasks-capability phrase) was matching this
+// regex (the optional noun group let ANY "find my X" through) and being
+// misrouted to Calendar before Tasks' own detector ever got a chance. Both
+// of this regex's own existing test phrases ("Find my dentist appointment",
+// "Find my Budget Review meeting") already end in one of these nouns, so
+// requiring it doesn't change their behavior.
+const SEARCH_RE = /\bfind\b.{0,10}\bmy\b\s+(.+?)\s+(?:appointment|event|meeting)$/i;
 
 function attendeesFrom(text: string): string[] {
   return [...new Set((text.match(EMAIL_RE) ?? []).map((e) => e.toLowerCase()))];

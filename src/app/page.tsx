@@ -333,6 +333,7 @@ export default function Home() {
                 plannerCalls: res.plannerCalls ?? prev.plannerCalls,
                 gmail: (res as any).gmail ?? prev.gmail,
                 calendar: (res as any).calendar ?? prev.calendar,
+                tasks: (res as any).tasks ?? prev.tasks,
                 resolution: (res as any).resolution ?? prev.resolution,
               };
             }
@@ -380,6 +381,7 @@ export default function Home() {
           plannerCalls: result.plannerCalls ?? prev!.plannerCalls,
           gmail: (result as any).gmail ?? prev!.gmail,
           calendar: (result as any).calendar ?? prev!.calendar,
+          tasks: (result as any).tasks ?? prev!.tasks,
           resolution: (result as any).resolution ?? prev!.resolution,
         }));
       }

@@ -43,7 +43,7 @@ export interface ExecutionResult {
    * in scripts/tests that bypass task-manager.ts).
    */
   capability?: {
-    selected: 'read' | 'browser' | 'gmail' | 'calendar';
+    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks';
     reason: string;
     fallbackCapability?: 'browser';
     readAttempted: boolean;
@@ -71,6 +71,17 @@ export interface ExecutionResult {
     operation: 'list' | 'search' | 'freebusy' | 'propose_create' | 'propose_update' | 'propose_cancel' | 'create' | 'update' | 'delete';
     pendingAction?: { type: 'calendar_create' | 'calendar_update' | 'calendar_delete'; title: string; start: string; confirmationRequired: true };
     resultEventId?: string;
+  };
+  /**
+   * Checkpoint 20: set only when the Tasks capability handled this task —
+   * which operation ran, and (for a proposal, or a just-consumed
+   * confirmation) the pending action state for observability. Optional and
+   * additive, same shape discipline as `gmail`/`calendar` above.
+   */
+  tasks?: {
+    operation: 'list_lists' | 'list' | 'search' | 'propose_create' | 'propose_update' | 'propose_complete' | 'propose_delete' | 'create' | 'update' | 'complete' | 'delete';
+    pendingAction?: { type: 'tasks_create' | 'tasks_update' | 'tasks_complete' | 'tasks_delete'; title: string; due?: string; confirmationRequired: true };
+    resultTaskId?: string;
   };
   /**
    * Checkpoint 19: set only when a Gmail draft or Calendar proposal
