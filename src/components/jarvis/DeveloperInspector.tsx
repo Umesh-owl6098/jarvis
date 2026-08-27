@@ -77,6 +77,20 @@ export function DeveloperInspector({ task, routerLabel }: DeveloperInspectorProp
           <Row label="Confirmation" value="REQUIRED" />
         </>
       )}
+      {task.resolution && (
+        <Row
+          label="Resolution"
+          value={
+            task.resolution.status === 'resolved'
+              ? `${task.resolution.query} → ${task.resolution.email}`
+              : task.resolution.status === 'ambiguous'
+                ? `AMBIGUOUS · ${task.resolution.query}`
+                : task.resolution.status === 'ambiguous_email'
+                  ? `MULTIPLE EMAILS · ${task.resolution.query}`
+                  : `NOT FOUND · ${task.resolution.query}`
+          }
+        />
+      )}
       <Row label="Events" value={task.events.length} />
       <Row label="Observe" value={countOf('agent.observing')} />
       <Row label="Plan" value={countOf('agent.planning')} />

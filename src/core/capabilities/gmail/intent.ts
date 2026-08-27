@@ -25,6 +25,14 @@ export interface GmailIntent {
   body?: string;
   /** true when the draft request had no NL body content to extract at all — needs clarification, never guessed (§7/§14E). */
   missingRecipient?: boolean;
+  /**
+   * Checkpoint 19 — the raw recipient-segment text when no explicit email
+   * was found there ("Draft an email to Ramesh..." -> "Ramesh"). A
+   * candidate NAME for Contacts resolution, not itself a usable address —
+   * gmail/runner.ts attempts resolvePerson() on this before falling back
+   * to "missing recipient." Never set alongside a real email match.
+   */
+  recipientNameHint?: string;
 }
 
 const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w-]+/g;
@@ -124,6 +132,10 @@ export function detectGmailIntent(task: string): GmailIntent | null {
     const cc = parseRecipients(CC_RE.exec(t)?.[1] ?? '');
     const explicitSubject = SUBJECT_RE.exec(t)?.[1]?.trim();
     const explicitBody = BODY_LABEL_RE.exec(bodySegment)?.[1]?.trim();
+    // §19 — no explicit email in the recipient segment, but real text is
+    // there ("Ramesh") — a candidate name for Contacts resolution, not a
+    // guess at an address. Trimmed of trailing punctuation only.
+    const nameHint = recipients.length === 0 ? recipientSegment.replace(/[.,!?]+$/g, '').trim() : '';
     return {
       operation: 'draft',
       raw: t,
@@ -132,6 +144,7 @@ export function detectGmailIntent(task: string): GmailIntent | null {
       subject: explicitSubject,
       body: explicitBody || bodySegment || undefined,
       missingRecipient: recipients.length === 0,
+      recipientNameHint: nameHint || undefined,
     };
   }
 

@@ -32,6 +32,8 @@ export interface CalendarIntent {
   /** propose_create */
   title?: string;
   attendees?: string[];
+  /** Checkpoint 19 — a candidate attendee NAME ("with Ramesh") for Contacts resolution, set only when no explicit email was found. */
+  attendeeNameHint?: string;
   location?: string;
   durationMinutes?: number;
   proposedStart?: string;
@@ -50,6 +52,16 @@ export interface CalendarIntent {
 const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w-]+/g;
 
 const CALENDAR_WEBSITE_NAV_RE = /\b(?:open|go to|navigate to|visit)\s+(?:calendar\.google\.com|google\s+calendar)\b/i;
+
+// Checkpoint 19 — an explicit Gmail draft/send verb phrase always belongs to
+// Gmail, even when the message BODY happens to contain calendar-sounding
+// words. Caught live: "Draft an email to John Smith saying are you free
+// today" tripped FREEBUSY_RE below (a plain substring match with no
+// awareness that "are you free" was quoted inside a "saying ..." email
+// body), sending an explicit Gmail draft request to Calendar instead. This
+// guard mirrors GMAIL_WEBSITE_NAV_RE's own defensive top-of-function check
+// in gmail/intent.ts, just in the opposite direction.
+const GMAIL_EMAIL_VERB_RE = /\b(?:draft|write|compose|send|reply|forward)\b.{0,20}\b(?:an?\s+)?(?:email|message)\b/i;
 
 // "calendar" is included alongside the generic nouns (not a full
 // noun-requirement removal, unlike CREATE_VERB_RE — "cancel"/"delete"/
@@ -74,6 +86,12 @@ const SEARCH_RE = /\bfind\b.{0,10}\bmy\b\s+(.+?)\s*(?:appointment|event|meeting)
 
 function attendeesFrom(text: string): string[] {
   return [...new Set((text.match(EMAIL_RE) ?? []).map((e) => e.toLowerCase()))];
+}
+
+/** Checkpoint 19 — "schedule a meeting WITH Ramesh tomorrow..." -> "Ramesh", a candidate name for Contacts resolution. Only used when no explicit email was already found (an email always wins over a name in the same phrase). */
+function attendeeNameFrom(text: string): string | undefined {
+  const m = /\bwith\s+([A-Z][\w'-]*(?:\s+[A-Z][\w'-]*)?)\b/.exec(text);
+  return m?.[1];
 }
 
 function titleFrom(text: string): string {
@@ -181,6 +199,7 @@ export function detectCalendarIntent(task: string): CalendarIntent | null {
   const t = task.trim();
   const timezone = DEFAULT_TIMEZONE;
   if (CALENDAR_WEBSITE_NAV_RE.test(t)) return null;
+  if (GMAIL_EMAIL_VERB_RE.test(t)) return null;
 
   if (CANCEL_VERB_RE.test(t)) {
     const targetHint = stripSearchNoise(t);
@@ -211,12 +230,14 @@ export function detectCalendarIntent(task: string): CalendarIntent | null {
 
   if (CREATE_VERB_RE.test(t)) {
     const timing = resolveCreateTiming(t);
+    const attendees = attendeesFrom(t);
     return {
       operation: 'propose_create',
       raw: t,
       timezone,
       title: titleFrom(t),
-      attendees: attendeesFrom(t),
+      attendees,
+      attendeeNameHint: attendees.length === 0 ? attendeeNameFrom(t) : undefined,
       location: undefined,
       ...timing,
     };

@@ -33,6 +33,12 @@ export interface CalendarUiState {
   pendingAction?: { type: 'calendar_create' | 'calendar_update' | 'calendar_delete'; title: string; start: string; confirmationRequired: true };
 }
 
+export interface ResolutionUiState {
+  query: string;
+  status: 'resolved' | 'ambiguous' | 'ambiguous_email' | 'not_found';
+  email?: string;
+}
+
 export interface PlanSubgoalUiState {
   id: string;
   description: string;
@@ -65,6 +71,7 @@ export interface TaskUiState {
   plannerCalls?: number;
   gmail?: GmailUiState;
   calendar?: CalendarUiState;
+  resolution?: ResolutionUiState;
 }
 
 export type { AgentEvent, OmniRouteHealthStatus };

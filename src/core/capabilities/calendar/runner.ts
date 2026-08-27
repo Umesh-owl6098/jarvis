@@ -9,12 +9,16 @@
 import type { CalendarClient, CalendarEvent, CalendarProposal } from './types';
 import type { CalendarIntent } from './intent';
 import { formatLocal } from './datetime';
+import { resolvePerson, describeUnresolved, summarize, type ResolutionSummary } from '@/core/capabilities/contacts/resolver';
+import { getContactsClient, contactsAvailability } from '@/core/capabilities/contacts/resolve';
 
 export interface CalendarOperationResult {
   status: 'completed' | 'failed' | 'blocked' | 'stopped';
   resultText: string;
   /** Set only for a successful proposal — task-manager.ts turns this into a PendingAction. */
   proposalCreated?: { kind: 'create' | 'update' | 'delete'; proposal: CalendarProposal };
+  /** §19/§26 — set only when an attendee NAME (not an explicit email) was resolved through Contacts. */
+  resolution?: ResolutionSummary;
 }
 
 function isAbortError(e: any): boolean {
@@ -146,6 +150,27 @@ async function runInner(intent: CalendarIntent, client: CalendarClient, signal?:
         return { status: 'blocked', resultText: 'Could not resolve a specific date and time for this event.' };
       }
 
+      // §19 — no explicit attendee email, but a candidate NAME is present
+      // ("schedule a meeting with Ramesh...") — attempt Contacts
+      // resolution BEFORE building the proposal. Any outcome other than a
+      // single unambiguous match blocks with a clear message; an
+      // unavailable Contacts capability falls through to "no attendees,"
+      // exactly as if no name had been mentioned (never invents an invite).
+      let attendees = intent.attendees ?? [];
+      let resolution: ResolutionSummary | undefined;
+      if (attendees.length === 0 && intent.attendeeNameHint) {
+        const availability = contactsAvailability();
+        if (availability.available) {
+          const personResolution = await resolvePerson(intent.attendeeNameHint, getContactsClient(), signal);
+          resolution = summarize(personResolution);
+          if (personResolution.status === 'resolved') {
+            attendees = [personResolution.email];
+          } else {
+            return { status: 'blocked', resultText: describeUnresolved(personResolution), resolution };
+          }
+        }
+      }
+
       // §13 — conflict detection: never silently overwritten, always surfaced.
       const availability = await client.freeBusy(start, end, intent.timezone, signal);
       const conflict = availability.busy[0];
@@ -157,7 +182,7 @@ async function runInner(intent: CalendarIntent, client: CalendarClient, signal?:
         start,
         end,
         timezone: intent.timezone,
-        attendees: intent.attendees ?? [],
+        attendees,
         conflict: conflict ? await describeConflict(client, conflict, signal) : undefined,
       };
 
@@ -178,6 +203,7 @@ async function runInner(intent: CalendarIntent, client: CalendarClient, signal?:
           `LOCATION: ${proposal.location ?? '(none)'}` +
           conflictLine,
         proposalCreated: { kind: 'create', proposal },
+        resolution,
       };
     }
 

@@ -282,6 +282,7 @@ async function attemptCalendar(goal: string, taskId: string, onEvent: EventListe
       events: [],
       capability: { selected: 'calendar', reason: `Task names a Calendar ${intent.operation} operation.`, readAttempted: false, browserFallbackUsed: false },
       calendar: { operation: intent.operation, pendingAction },
+      resolution: outcome.resolution,
     };
   } catch (e: any) {
     const aborted = e?.name === 'AbortError' || signal?.aborted;
@@ -369,6 +370,7 @@ async function attemptGmail(goal: string, taskId: string, onEvent: EventListener
       events: [],
       capability: { selected: 'gmail', reason: `Task names a Gmail ${intent.operation} operation.`, readAttempted: false, browserFallbackUsed: false },
       gmail: { operation: intent.operation, pendingAction },
+      resolution: outcome.resolution,
     };
   } catch (e: any) {
     const aborted = e?.name === 'AbortError' || signal?.aborted;

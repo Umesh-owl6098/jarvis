@@ -73,6 +73,13 @@ export interface ExecutionResult {
     resultEventId?: string;
   };
   /**
+   * Checkpoint 19: set only when a Gmail draft or Calendar proposal
+   * attempted Contacts name resolution — for the Developer Inspector's
+   * optional RESOLUTION row. Never a full candidate list, just the
+   * outcome, matching §26/§14's privacy discipline.
+   */
+  resolution?: { query: string; status: 'resolved' | 'ambiguous' | 'ambiguous_email' | 'not_found'; email?: string };
+  /**
    * Checkpoint 14: the committed target (if any), for cross-subgoal result
    * passing — lets a subsequent subgoal consume the exact resolved
    * URL/label deterministically instead of rediscovering it from scratch.

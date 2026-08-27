@@ -8,6 +8,8 @@
 import { OmniRouteClient } from '@/core/router/client';
 import type { GmailClient, MailMessage, MailThread } from './types';
 import type { GmailIntent } from './intent';
+import { resolvePerson, describeUnresolved, summarize, type ResolutionSummary } from '@/core/capabilities/contacts/resolver';
+import { getContactsClient, contactsAvailability } from '@/core/capabilities/contacts/resolve';
 
 export interface GmailOperationResult {
   status: 'completed' | 'failed' | 'blocked' | 'stopped';
@@ -15,6 +17,8 @@ export interface GmailOperationResult {
   tokens: number;
   /** Set only for a successful 'draft' operation — task-manager.ts turns this into a PendingAction. */
   draftCreated?: { draftId: string; recipients: string[]; subject: string; body: string };
+  /** §19/§26 — set only when a recipient NAME (not an explicit email) was resolved through Contacts, for the Developer Inspector's optional RESOLUTION row. */
+  resolution?: ResolutionSummary;
 }
 
 /** §17 — cancellation stops cleanly BEFORE any state-changing call (createDraft), never claims a completed one was cancelled. */
@@ -138,23 +142,47 @@ async function runGmailIntentInner(intent: GmailIntent, client: GmailClient, sig
     }
 
     case 'draft': {
-      if (intent.missingRecipient || !intent.recipients || intent.recipients.length === 0) {
+      let recipients = intent.recipients ?? [];
+      let resolution: ResolutionSummary | undefined;
+
+      // §19 — no explicit email, but a candidate NAME is present ("Draft
+      // an email to Ramesh...") — attempt Contacts resolution BEFORE
+      // falling back to "missing recipient." Never guesses: any outcome
+      // other than a single unambiguous match blocks with a clear message.
+      if (recipients.length === 0 && intent.recipientNameHint) {
+        const availability = contactsAvailability();
+        if (availability.available) {
+          const personResolution = await resolvePerson(intent.recipientNameHint, getContactsClient(), signal);
+          resolution = summarize(personResolution);
+          if (personResolution.status === 'resolved') {
+            recipients = [personResolution.email];
+          } else {
+            return { status: 'blocked', resultText: describeUnresolved(personResolution), tokens: 0, resolution };
+          }
+        }
+        // Contacts unavailable (not authorized / not configured) — falls
+        // through to the existing "missing recipient" message below,
+        // exactly as if no name resolution had ever been attempted.
+      }
+
+      if (recipients.length === 0) {
         // §7/§14E — never guess a recipient. Ask, don't send to a wrong address.
         return {
           status: 'blocked',
-          resultText: 'No valid recipient email address was found in the request — please specify who to send this to (e.g. "to name@example.com").',
+          resultText: 'No valid recipient email address was found in the request — please specify who to send this to (e.g. "to name@example.com") or a contact name.',
           tokens: 0,
         };
       }
       const subject = intent.subject || '(no subject)';
       const body = intent.body || '';
-      const draft = await client.createDraft(intent.recipients, subject, body, intent.cc, signal);
+      const draft = await client.createDraft(recipients, subject, body, intent.cc, signal);
       const ccLine = intent.cc?.length ? `\nCC: ${intent.cc.join(', ')}` : '';
       return {
         status: 'completed',
-        resultText: `DRAFT CREATED\n\nTo: ${intent.recipients.join(', ')}${ccLine}\nSubject: ${subject}\nBody: ${body || '(empty)'}`,
+        resultText: `DRAFT CREATED\n\nTo: ${recipients.join(', ')}${ccLine}\nSubject: ${subject}\nBody: ${body || '(empty)'}`,
         tokens: 0,
-        draftCreated: { draftId: draft.draftId, recipients: intent.recipients, subject, body },
+        draftCreated: { draftId: draft.draftId, recipients, subject, body },
+        resolution,
       };
     }
   }

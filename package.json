@@ -38,7 +38,14 @@
     "test:calendar-propose": "tsx src/scripts/test-checkpoint18-calendar-propose.ts",
     "test:calendar-update-delete": "tsx src/scripts/test-checkpoint18-calendar-update-delete.ts",
     "test:calendar-security": "tsx src/scripts/test-checkpoint18-calendar-security.ts",
-    "test:calendar-cancellation": "tsx src/scripts/test-checkpoint18-calendar-cancellation.ts"
+    "test:calendar-cancellation": "tsx src/scripts/test-checkpoint18-calendar-cancellation.ts",
+    "test:contacts-lookup": "tsx src/scripts/test-checkpoint19-contacts-lookup.ts",
+    "test:contacts-security": "tsx src/scripts/test-checkpoint19-contacts-security.ts",
+    "test:gmail-contacts": "tsx src/scripts/test-checkpoint19-gmail-contacts.ts",
+    "test:gmail-contacts-extra": "tsx src/scripts/test-checkpoint19-gmail-contacts-extra.ts",
+    "test:calendar-contacts": "tsx src/scripts/test-checkpoint19-calendar-contacts.ts",
+    "test:calendar-contacts-extra": "tsx src/scripts/test-checkpoint19-calendar-contacts-extra.ts",
+    "test:voice-contacts": "tsx src/scripts/test-checkpoint19-voice-contacts.ts"
   },
   "keywords": [],
   "author": "",

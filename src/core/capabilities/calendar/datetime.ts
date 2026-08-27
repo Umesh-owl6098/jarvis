@@ -51,7 +51,13 @@ export interface ResolvedDay {
 }
 
 const TIME_RE = /\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i;
-const DURATION_RE = /\bfor\s+(?:(\d+)\s*(?:min(?:ute)?s?)|(?:an?\s+)?hour|(\d+(?:\.\d+)?)\s*hours?)\b/i;
+// "for" is optional — real usage caught live: "Schedule a 10 minute meeting
+// with GV tomorrow" names the duration adjectivally, before the noun
+// ("10 minute meeting"), not in the trailing "for 10 minutes" form this
+// regex originally required. Only used by resolveCreateTiming() for the
+// CREATE flow (single caller), so broadening this can't affect update/
+// cancel/search intent parsing elsewhere.
+const DURATION_RE = /\b(?:for\s+)?(?:(\d+)\s*(?:min(?:ute)?s?)|(?:an?\s+)?hour|(\d+(?:\.\d+)?)\s*hours?)\b/i;
 const DAY_PART_RE = /\b(morning|afternoon|evening)\b/i;
 
 /** Resolves "today"/"tomorrow"/"next <weekday>"/bare "<weekday>" to a days-from-now offset. Returns null if no day phrase is present at all (caller decides whether that means "today" by default or "ambiguous"). */
