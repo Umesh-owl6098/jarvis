@@ -18,6 +18,7 @@ import {
 } from './datetime';
 import type { CalendarPendingActionType } from './pending-action';
 import { GMAIL_EMAIL_VERB_RE } from '@/core/capabilities/shared/gmail-guard';
+import { isPersonalQueryShape } from '@/core/capabilities/shared/query-shape';
 
 export type CalendarOperation = 'list' | 'search' | 'freebusy' | 'propose_create' | 'propose_update' | 'propose_cancel';
 
@@ -70,9 +71,19 @@ const UPDATE_VERB_RE = /\b(?:move|reschedule|change)\b.{0,40}\b(?:appointment|ev
 // never contains one, and requiring it silently misrouted such requests to
 // the browser path entirely (caught via real-account testing). Just needs
 // the create verb plus "a/an" — titleFrom() extracts whatever follows.
-const CREATE_VERB_RE = /\b(?:schedule|create|book|set up)\b\s+(?:an?\s+)?\S/i;
+// The negative lookbehind on "schedule" specifically excludes its NOMINAL
+// use ("my schedule", "the schedule") — caught live: "What's my schedule
+// today?" was being read as CREATE("schedule" + "today" as the object),
+// building a nonsense event proposal instead of falling through to the
+// list-my-calendar classifier below. "create"/"book"/"set up" have no such
+// noun/verb ambiguity in English, so they're unaffected.
+const CREATE_VERB_RE = /\b(?:create|book|set up)\b\s+(?:an?\s+)?\S|(?<!\b(?:my|your|his|her|our|their|the)\s)\bschedule\b\s+(?:an?\s+)?\S/i;
 const FREEBUSY_RE = /\b(?:am i free|are you free|is .+ free|free at|available at|do i have.*free)\b/i;
-const LIST_TODAY_RE = /\bwhat(?:'s| is| do i have)\b.{0,20}\b(today|tomorrow)\b|\b(today|tomorrow)\b.{0,20}\bschedule\b|\bmy schedule\b/i;
+// Concept vocabulary for the shared query-shape classifier (see
+// detectCalendarIntent's final fallback below) — replaces enumerating
+// exact sentence shapes ("what's my schedule", "do i have anything on my
+// calendar today", "what meetings do i have tomorrow", ...) one at a time.
+const CALENDAR_CONCEPT_RE = /\b(?:calendar|schedule|meetings?|events?|appointments?)\b/i;
 // Checkpoint 20 — the trailing noun is now REQUIRED, not optional: caught
 // live, "Find my report task" (a Tasks-capability phrase) was matching this
 // regex (the optional noun group let ANY "find my X" through) and being
@@ -259,7 +270,27 @@ export function detectCalendarIntent(task: string): CalendarIntent | null {
     return { operation: 'search', raw: t, timezone, searchQuery: searchMatch[1].trim() };
   }
 
-  if (LIST_TODAY_RE.test(t) || /\bwhat (?:meetings|events) do i have\b/i.test(t) || /\bevents? (?:between|from)\b/i.test(t)) {
+  // Explicit range phrasing ("events between Monday and Friday") is
+  // unambiguous by its own structure — no personal pronoun needed.
+  const explicitRange = /\bevents? (?:between|from)\b/i.test(t);
+  // Bare "What's/What is/What do I have today?" — no calendar-concept noun
+  // at all, but this is Calendar's own established, pre-existing trigger
+  // (predates the concept+shape classifier below). The negative lookahead
+  // on "have" excludes "What do I have TO DO today?" specifically — that's
+  // Tasks' own bare idiom (a different verb shape, "have TO DO" vs bare
+  // "have"), and Calendar is checked before Tasks in task-manager.ts, so
+  // without this exclusion Calendar would wrongly steal it.
+  const bareWhatDoIHave =
+    /\bwhat(?:'s| is)\b(?!.{0,20}\b(?:tasks?|to-?dos?|reminders?)\b).{0,20}\b(?:today|tomorrow)\b/i.test(t) ||
+    /\bwhat do i have\b(?!\s+to\s+do\b).{0,20}\b(?:today|tomorrow)\b/i.test(t);
+  // Final fallback: a personal query ABOUT the calendar, in whatever
+  // natural phrasing — "Do I have anything on my calendar today?", "What
+  // meetings do I have tomorrow?", "What's my schedule?" and similar
+  // paraphrases, via the shared concept+shape classifier (see
+  // gmail/intent.ts's identical use for the same reason: patching one
+  // exact sentence at a time cannot keep up with real natural language).
+  const personalCalendarQuery = CALENDAR_CONCEPT_RE.test(t) && isPersonalQueryShape(t);
+  if (explicitRange || bareWhatDoIHave || personalCalendarQuery) {
     const day = resolveDayPhrase(t) ?? { daysFromNow: 0, label: 'today' };
     const dayPart = resolveDayPart(t);
     const range = dayPart ? dayPartRangeIso(day.daysFromNow, dayPart) : dayRangeIso(day.daysFromNow);

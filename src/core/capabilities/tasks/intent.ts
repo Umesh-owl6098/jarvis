@@ -15,6 +15,7 @@
 
 import { resolveDayPhrase, taskDueIso, DEFAULT_TIMEZONE } from './datetime';
 import { GMAIL_EMAIL_VERB_RE } from '@/core/capabilities/shared/gmail-guard';
+import { isPersonalQueryShape } from '@/core/capabilities/shared/query-shape';
 import type { TasksPendingActionType } from './pending-action';
 
 export type TasksOperation = 'list_lists' | 'list' | 'search' | 'propose_create' | 'propose_update' | 'propose_complete' | 'propose_delete';
@@ -39,10 +40,17 @@ const TASKS_WEBSITE_NAV_RE = /\b(?:open|go to|navigate to|visit)\s+(?:tasks\.goo
 const DAY_WORD_RE = /\b(?:today|tomorrow|next\s+\w+|on\s+\w+|due\s+\w+|by\s+\w+|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i;
 
 const LIST_TASKLISTS_RE = /\b(?:list|show)\s+(?:my\s+)?task\s*lists\b|\bwhat\s+task\s*lists\b/i;
-const LIST_TASKS_TODAY_RE =
-  /\b(?:what\s+tasks?\s+do\s+i\s+have|what\s+do\s+i\s+need\s+to\s+do|what\s+do\s+i\s+have\s+to\s+do)\b.{0,25}\b(today|tomorrow)\b/i;
-const LIST_TASKS_RE = /\b(?:list|show)\s+(?:my\s+)?tasks\b/i;
+// "What do I need/have to do [today]?" names no literal "task" word at all
+// — the one fixed English idiom for this concept that the concept+shape
+// classifier below can't catch via vocabulary alone, so it stays a
+// dedicated trigger. Day word is optional now (was required) so a bare
+// "What do I need to do?" also works, not just the day-qualified form.
+const NEED_TO_DO_RE = /\bwhat\s+do\s+i\s+(?:need|have)\s+to\s+do\b/i;
 const SEARCH_TASK_RE = /\bfind\s+(?:my\s+|the\s+)?(.+?)\s+task\b|\bfind\s+task\s+(.+)$/i;
+// Concept vocabulary for the shared query-shape classifier (see
+// detectTasksIntent's final fallback below) — replaces enumerating exact
+// sentence shapes one at a time.
+const TASKS_CONCEPT_RE = /\btasks?\b|\bto-?dos?\b|\breminders?\b/i;
 const CREATE_REMIND_RE = /\bremind me to\b\s+(.+)$/i;
 const CREATE_ADD_RE = /\badd\s+(?:a\s+)?(?:task|reminder)\s+(?:to|that)\s+(.+)$/i;
 // \btasks?\b (not just \btask\b) — caught live: "Mark JARVIS Tasks
@@ -127,13 +135,14 @@ export function detectTasksIntent(task: string): TasksIntent | null {
     if (q) return { operation: 'search', raw: t, timezone, searchQuery: q };
   }
 
-  if (LIST_TASKS_TODAY_RE.test(t)) {
-    const day = resolveDayPhrase(t) ?? { daysFromNow: 0, label: 'today' };
-    return { operation: 'list', raw: t, timezone, dueDay: taskDueIso(day.daysFromNow) };
-  }
-
-  if (LIST_TASKS_RE.test(t)) {
-    return { operation: 'list', raw: t, timezone };
+  // Final fallback: a personal query ABOUT tasks, in whatever natural
+  // phrasing — "What tasks do I have today?", "Any new tasks?", "What do
+  // I need to do tomorrow?", "Show my reminders" and similar paraphrases,
+  // via the shared concept+shape classifier (same reasoning as gmail/
+  // intent.ts and calendar/intent.ts's identical use).
+  if (NEED_TO_DO_RE.test(t) || (TASKS_CONCEPT_RE.test(t) && isPersonalQueryShape(t))) {
+    const day = resolveDayPhrase(t);
+    return { operation: 'list', raw: t, timezone, dueDay: day ? taskDueIso(day.daysFromNow) : undefined };
   }
 
   return null;

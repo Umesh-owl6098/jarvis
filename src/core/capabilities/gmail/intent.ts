@@ -6,7 +6,19 @@
  * The only LLM call in the whole Gmail path is the SUMMARIZE operation's
  * actual summarization of real fetched text (genuine reasoning over
  * content, not classification) — see gmail-runner.ts.
+ *
+ * Read-query detection uses the shared concept+shape classifier
+ * (capabilities/shared/query-shape.ts) rather than enumerating exact
+ * sentence shapes — caught live via the production UI: "What is the
+ * latest email I got from Sarah?", "What emails did I get today?", "Did I
+ * get any emails today?", "Who emailed me today?" etc. are the same
+ * request phrased differently, and patching one exact sentence at a time
+ * cannot keep up with real natural language. DRAFT/SUMMARIZE/READ-THREAD/
+ * explicit find-search-with-qualifier detection is unchanged — only the
+ * final "what does the user want to see" fallback was consolidated.
  */
+
+import { isPersonalQueryShape } from '@/core/capabilities/shared/query-shape';
 
 export type GmailOperation = 'list' | 'search' | 'read' | 'summarize' | 'draft';
 
@@ -64,12 +76,30 @@ const BODY_LABEL_RE = /\bbody\s*(?:is|:)?\s*["']?(.+?)["']?$/i;
 const SEARCH_QUALIFIED_RE =
   /\b(?:find|search(?: for)?)\b.{0,10}\b(?:email|emails|message|messages|mail)\b.*?\bfrom\s+([^\n]+?)(?:\s+about\s+([^\n]+))?$|\b(?:find|search(?: for)?)\b.{0,10}\b(?:email|emails|message|messages|mail)\b.*?\babout\s+([^\n]+)$/i;
 const SEARCH_FREEFORM_RE = /\b(?:find|search)\b.{0,10}\b(?:email|emails|message|messages|mail)\b\s+for\s+(?:the\s+)?([^\n]+)$/i;
-const LIST_RE = /\b(?:show|list)\b.{0,15}\b(?:latest|recent)\b.{0,10}\bemails?\b/i;
 // Word-based budget (not character count) between "read" and "thread" so
 // phrasing length variance ("read my latest thread" vs "read thread")
 // doesn't silently fall outside a fixed character window.
 const READ_THREAD_RE = /\bread\b(?:\s+\S+){0,4}?\s+thread\b(?:\s+with\s+([^\n]+))?/i;
 const SUMMARIZE_RE = /\bsummarize\b.{0,20}\b(?:thread|email|message)\b(?:\s+with\s+([^\n]+))?/i;
+
+// Concept vocabulary for the shared query-shape classifier below. Includes
+// verb forms (emailed/emailing) so "Who emailed me today?" still matches —
+// \bemails?\b alone does NOT match "emailed" (different word, trailing -ed).
+const GMAIL_CONCEPT_RE = /\bemail(?:s|ed|ing)?\b|\bmails?\b|\binbox\b/i;
+const TEMPORAL_ONLY_RE = /^(?:today|tomorrow|yesterday|this week|last week|next week|recently)\.?$/i;
+
+/** A sender NAME the user explicitly asked about — "from X" or "what did X email me" — never a guess, and never a temporal word ("emails from today") misread as a name. */
+function extractGmailSender(t: string): string | undefined {
+  const didMatch = /\b(?:what\s+did|did)\s+((?!i\b|you\b|we\b|they\b|he\b|she\b)[\w'-]+(?:\s+[\w'-]+)?)\s+email(?:ed)?\s+me\b/i.exec(t);
+  if (didMatch) return didMatch[1].trim();
+
+  const fromMatch = /\bfrom\s+([^\n?.!]+)/i.exec(t);
+  if (fromMatch) {
+    const candidate = fromMatch[1].replace(/[.,!?]+$/g, '').trim();
+    if (candidate && !TEMPORAL_ONLY_RE.test(candidate)) return candidate;
+  }
+  return undefined;
+}
 
 function parseRecipients(text: string): string[] {
   return [...new Set((text.match(EMAIL_RE) ?? []).map((e) => e.toLowerCase()))];
@@ -148,16 +178,6 @@ export function detectGmailIntent(task: string): GmailIntent | null {
     };
   }
 
-  if (LIST_RE.test(t)) {
-    // §17.1 live test caught this: "Show my latest 3 emails" was silently
-    // returning 5 — the user's own explicit count was parsed nowhere.
-    // Any digit in the request is used as the count; otherwise default 5.
-    const countMatch = /\b(\d+)\b/.exec(t);
-    const requested = countMatch ? parseInt(countMatch[1], 10) : 5;
-    const max = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 50) : 5;
-    return { operation: 'list', raw: t, max };
-  }
-
   const summarizeMatch = SUMMARIZE_RE.exec(t);
   if (summarizeMatch) {
     return { operation: 'summarize', raw: t, targetHint: (summarizeMatch[1] ?? 'latest').trim() };
@@ -182,6 +202,27 @@ export function detectGmailIntent(task: string): GmailIntent | null {
     if (query) {
       return { operation: 'search', raw: t, searchQuery: query, max: 10 };
     }
+  }
+
+  // Final fallback: a personal query ABOUT email, in whatever natural
+  // phrasing — everything above already claimed the narrower explicit-verb
+  // shapes (draft/summarize/read thread/find-search-with-qualifier); this
+  // catches "What emails did I get today?", "Any new emails today?", "Who
+  // emailed me today?", "What did John email me?" and similar paraphrases
+  // without needing a new regex per sentence. A named sender becomes a
+  // SEARCH; otherwise it's a LIST (same default count logic as before).
+  if (GMAIL_CONCEPT_RE.test(t) && isPersonalQueryShape(t)) {
+    const sender = extractGmailSender(t);
+    if (sender) {
+      return { operation: 'search', raw: t, searchQuery: sender, max: 10 };
+    }
+    // §17.1 live test caught this: "Show my latest 3 emails" was silently
+    // returning 5 — the user's own explicit count was parsed nowhere.
+    // Any digit in the request is used as the count; otherwise default 5.
+    const countMatch = /\b(\d+)\b/.exec(t);
+    const requested = countMatch ? parseInt(countMatch[1], 10) : 5;
+    const max = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 50) : 5;
+    return { operation: 'list', raw: t, max };
   }
 
   return null;
