@@ -54,11 +54,13 @@ export function DeveloperInspector({ task, routerLabel }: DeveloperInspectorProp
                 ? 'CALENDAR'
                 : task.capability.selected === 'tasks'
                   ? 'TASKS'
-                  : task.capability.selected === 'read'
-                    ? 'READ'
-                    : task.capability.browserFallbackUsed
-                      ? 'BROWSER (read fallback)'
-                      : 'BROWSER'
+                  : task.capability.selected === 'orchestration'
+                    ? 'ORCHESTRATION'
+                    : task.capability.selected === 'read'
+                      ? 'READ'
+                      : task.capability.browserFallbackUsed
+                        ? 'BROWSER (read fallback)'
+                        : 'BROWSER'
           }
         />
       )}
@@ -102,6 +104,26 @@ export function DeveloperInspector({ task, routerLabel }: DeveloperInspectorProp
                   : `NOT FOUND · ${task.resolution.query}`
           }
         />
+      )}
+      {task.orchestration && (
+        <div className="py-[3px]">
+          <div className="j-label mb-1 flex items-baseline justify-between">
+            <span>Orchestration</span>
+            <span>{task.orchestration.pattern} · {task.orchestration.status.toUpperCase()}</span>
+          </div>
+          <div className="space-y-[2px]">
+            {task.orchestration.steps.map((s) => {
+              const mark =
+                s.status === 'completed' ? '✓' : s.status === 'pending_confirmation' ? '●' : s.status === 'skipped_dependency' ? '⊘' : '✕';
+              return (
+                <div key={s.id} className="truncate text-[10.5px] text-[color:var(--j-body)]" title={s.resultText}>
+                  {mark} {s.capability}:{s.id} — {s.status.toUpperCase()}
+                  {s.remoteWriteOccurred ? ' · REMOTE WRITE' : ''}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
       <Row label="Events" value={task.events.length} />
       <Row label="Observe" value={countOf('agent.observing')} />

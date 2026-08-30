@@ -45,12 +45,12 @@ const LIST_TASKLISTS_RE = /\b(?:list|show)\s+(?:my\s+)?task\s*lists\b|\bwhat\s+t
 // classifier below can't catch via vocabulary alone, so it stays a
 // dedicated trigger. Day word is optional now (was required) so a bare
 // "What do I need to do?" also works, not just the day-qualified form.
-const NEED_TO_DO_RE = /\bwhat\s+do\s+i\s+(?:need|have)\s+to\s+do\b/i;
+export const NEED_TO_DO_RE = /\bwhat\s+do\s+i\s+(?:need|have)\s+to\s+do\b/i;
 const SEARCH_TASK_RE = /\bfind\s+(?:my\s+|the\s+)?(.+?)\s+task\b|\bfind\s+task\s+(.+)$/i;
 // Concept vocabulary for the shared query-shape classifier (see
 // detectTasksIntent's final fallback below) — replaces enumerating exact
 // sentence shapes one at a time.
-const TASKS_CONCEPT_RE = /\btasks?\b|\bto-?dos?\b|\breminders?\b/i;
+export const TASKS_CONCEPT_RE = /\btasks?\b|\bto-?dos?\b|\breminders?\b/i;
 const CREATE_REMIND_RE = /\bremind me to\b\s+(.+)$/i;
 const CREATE_ADD_RE = /\badd\s+(?:a\s+)?(?:task|reminder)\s+(?:to|that)\s+(.+)$/i;
 // \btasks?\b (not just \btask\b) — caught live: "Mark JARVIS Tasks
@@ -168,4 +168,15 @@ export function isAmbiguousTasksConfirmPhrase(text: string): boolean {
 export function isTasksRejectPhrase(text: string): boolean {
   const t = text.trim().toLowerCase();
   return /^(no|don'?t (?:do (?:that|it)|create it|update it|complete it|delete it)|never mind|abort|stop)\.?!?$/.test(t);
+}
+
+/**
+ * Checkpoint 21 fix — an UNAMBIGUOUS, Tasks-specific cancel phrase: names
+ * "the task"/"the reminder" explicitly, so it's safe regardless of what
+ * else is pending. See gmail/intent.ts's isGmailSpecificCancelPhrase for
+ * why this exists.
+ */
+export function isTasksSpecificCancelPhrase(text: string): boolean {
+  const t = text.trim().toLowerCase().replace(/[.,!?]+$/, '');
+  return /^(cancel|don'?t (?:create|add)) the (task|reminder)$/.test(t);
 }

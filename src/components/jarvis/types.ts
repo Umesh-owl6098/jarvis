@@ -18,9 +18,15 @@ export interface BrowserUiState {
 }
 
 export interface CapabilityUiState {
-  selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks';
+  selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration';
   reason: string;
   browserFallbackUsed: boolean;
+}
+
+export interface OrchestrationUiState {
+  pattern: string;
+  status: 'completed' | 'partial' | 'blocked' | 'failed';
+  steps: { id: string; capability: 'calendar' | 'gmail' | 'tasks'; description: string; status: 'completed' | 'pending_confirmation' | 'failed' | 'skipped_dependency'; resultText: string; remoteWriteOccurred?: boolean }[];
 }
 
 export interface GmailUiState {
@@ -78,6 +84,7 @@ export interface TaskUiState {
   calendar?: CalendarUiState;
   tasks?: TasksUiState;
   resolution?: ResolutionUiState;
+  orchestration?: OrchestrationUiState;
 }
 
 export type { AgentEvent, OmniRouteHealthStatus };

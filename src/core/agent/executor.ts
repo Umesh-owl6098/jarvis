@@ -43,7 +43,7 @@ export interface ExecutionResult {
    * in scripts/tests that bypass task-manager.ts).
    */
   capability?: {
-    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks';
+    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration';
     reason: string;
     fallbackCapability?: 'browser';
     readAttempted: boolean;
@@ -90,6 +90,19 @@ export interface ExecutionResult {
    * outcome, matching §26/§14's privacy discipline.
    */
   resolution?: { query: string; status: 'resolved' | 'ambiguous' | 'ambiguous_email' | 'not_found'; email?: string };
+  /**
+   * Checkpoint 21: set only when a multi-capability orchestration pattern
+   * matched and ran — which fixed pattern, the overall status, and each
+   * step's own status/result for observability. Optional and additive,
+   * same discipline as gmail/calendar/tasks above. Never itself a mutation
+   * — every step here already went through its own capability's real
+   * PendingAction store if it proposed one.
+   */
+  orchestration?: {
+    pattern: string;
+    status: 'completed' | 'partial' | 'blocked' | 'failed';
+    steps: { id: string; capability: 'calendar' | 'gmail' | 'tasks'; description: string; status: 'completed' | 'pending_confirmation' | 'failed' | 'skipped_dependency'; resultText: string; remoteWriteOccurred?: boolean }[];
+  };
   /**
    * Checkpoint 14: the committed target (if any), for cross-subgoal result
    * passing — lets a subsequent subgoal consume the exact resolved

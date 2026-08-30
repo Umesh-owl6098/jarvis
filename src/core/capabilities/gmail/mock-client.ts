@@ -109,21 +109,33 @@ export class MockGmailClient implements GmailClient {
 
   async search(query: string, max: number, signal?: AbortSignal): Promise<MailSearchResult> {
     if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
-    // Multi-term AND, not one literal substring — a query like "John
-    // invoice" (from-name + subject-keyword combined) needs every term to
-    // appear SOMEWHERE across the message's fields, not as one contiguous
-    // phrase; the real Gmail API's own `q` parameter already does this
-    // natively, so this mock has to reproduce that behavior to stay a
-    // faithful stand-in, not silently return zero results for a message
-    // that genuinely matches every term.
-    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const matched = this.messages.filter((m) => {
-      // Matching still searches the FULL body (mirrors real Gmail's own
-      // full-text search) — only the RETURNED objects are redacted below,
-      // same as the real client's format:'metadata' fetch never pulling
-      // body text in the first place while its query still full-text matches.
-      const haystack = `${m.from} ${m.to.join(' ')} ${m.subject} ${m.text}`.toLowerCase();
-      return terms.every((term) => haystack.includes(term));
+    // Post-Checkpoint-21 fix — a `from:X` / `from:"multi word"` token
+    // restricts to the SENDER field only, mirroring Gmail's own real search
+    // operator (the real client passes `q` straight through to the actual
+    // API, which already understands `from:` natively — this mock has to
+    // reproduce that specific behavior to stay a faithful stand-in). Caught
+    // live: "find the latest email from Anthropic" previously matched any
+    // message merely mentioning "Anthropic" in its BODY, none of them
+    // actually sent by Anthropic. A bare (non-"from:") term still searches
+    // the full haystack, same as before — only sender-scoped terms changed.
+    const fromTerms: string[] = [];
+    const plainTerms: string[] = [];
+    const tokenRe = /from:"([^"]+)"|from:(\S+)|(\S+)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = tokenRe.exec(query))) {
+      if (m[1]) fromTerms.push(m[1].toLowerCase());
+      else if (m[2]) fromTerms.push(m[2].toLowerCase());
+      else if (m[3]) plainTerms.push(m[3].toLowerCase());
+    }
+    const matched = this.messages.filter((m2) => {
+      // Matching still searches the FULL body for plain terms (mirrors real
+      // Gmail's own full-text search) — only the RETURNED objects are
+      // redacted below, same as the real client's format:'metadata' fetch
+      // never pulling body text in the first place while its query still
+      // full-text matches.
+      const fromHaystack = m2.from.toLowerCase();
+      const fullHaystack = `${m2.from} ${m2.to.join(' ')} ${m2.subject} ${m2.text}`.toLowerCase();
+      return fromTerms.every((t) => fromHaystack.includes(t)) && plainTerms.every((t) => fullHaystack.includes(t));
     });
     return { query, messages: matched.slice(0, max).map(redactToSnippet), resultSizeEstimate: matched.length };
   }

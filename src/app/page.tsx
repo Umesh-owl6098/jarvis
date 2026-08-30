@@ -335,6 +335,7 @@ export default function Home() {
                 calendar: (res as any).calendar ?? prev.calendar,
                 tasks: (res as any).tasks ?? prev.tasks,
                 resolution: (res as any).resolution ?? prev.resolution,
+                orchestration: (res as any).orchestration ?? prev.orchestration,
               };
             }
 
@@ -383,6 +384,7 @@ export default function Home() {
           calendar: (result as any).calendar ?? prev!.calendar,
           tasks: (result as any).tasks ?? prev!.tasks,
           resolution: (result as any).resolution ?? prev!.resolution,
+          orchestration: (result as any).orchestration ?? prev!.orchestration,
         }));
       }
     } catch (error) {

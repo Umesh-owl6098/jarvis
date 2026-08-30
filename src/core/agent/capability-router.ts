@@ -21,7 +21,14 @@ import type { ReadSource } from '@/core/capabilities/read';
 // detectTasksIntent). All are single-shot operations, not multi-step
 // browser subgoal chains, so none needs TaskPlan decomposition or this
 // router's own browser-vs-read heuristics.
-export type Capability = 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks';
+// Checkpoint 21: 'orchestration' exists for the same reason 'gmail'/
+// 'calendar'/'tasks' do — type-consistency with ExecutionResult.capability
+// .selected — but routeCapability() itself never returns it either.
+// Orchestration is intercepted in task-manager.ts's runTask() BEFORE any
+// single-capability check (see orchestrator.ts): a small, fixed set of
+// compound-request SHAPES, each decomposed into steps that reuse the
+// EXISTING single-capability detect/run functions directly.
+export type Capability = 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration';
 
 export interface CapabilityDecision {
   selectedCapability: Capability;

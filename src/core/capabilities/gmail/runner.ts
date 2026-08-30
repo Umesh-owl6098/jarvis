@@ -8,6 +8,7 @@
 import { OmniRouteClient } from '@/core/router/client';
 import type { GmailClient, MailMessage, MailThread } from './types';
 import type { GmailIntent } from './intent';
+import { humanizeSenderQuery } from './intent';
 import { resolvePerson, describeUnresolved, summarize, type ResolutionSummary } from '@/core/capabilities/contacts/resolver';
 import { getContactsClient, contactsAvailability } from '@/core/capabilities/contacts/resolve';
 
@@ -108,12 +109,13 @@ async function runGmailIntentInner(intent: GmailIntent, client: GmailClient, sig
       const q = intent.searchQuery ?? '';
       if (!q.trim()) return { status: 'failed', resultText: 'No search terms were understood in the request.', tokens: 0 };
       const result = await client.search(q, intent.max ?? 10, signal);
+      const displayQuery = humanizeSenderQuery(q);
       if (result.messages.length === 0) {
-        return { status: 'completed', resultText: `No emails matched "${q}".`, tokens: 0 };
+        return { status: 'completed', resultText: `No emails matched "${displayQuery}".`, tokens: 0 };
       }
       return {
         status: 'completed',
-        resultText: `Found ${result.messages.length} email(s) matching "${q}":\n\n${result.messages.map(formatMessageLine).join('\n\n')}`,
+        resultText: `Found ${result.messages.length} email(s) matching "${displayQuery}":\n\n${result.messages.map(formatMessageLine).join('\n\n')}`,
         tokens: 0,
       };
     }

@@ -83,7 +83,7 @@ const FREEBUSY_RE = /\b(?:am i free|are you free|is .+ free|free at|available at
 // detectCalendarIntent's final fallback below) — replaces enumerating
 // exact sentence shapes ("what's my schedule", "do i have anything on my
 // calendar today", "what meetings do i have tomorrow", ...) one at a time.
-const CALENDAR_CONCEPT_RE = /\b(?:calendar|schedule|meetings?|events?|appointments?)\b/i;
+export const CALENDAR_CONCEPT_RE = /\b(?:calendar|schedule|meetings?|events?|appointments?)\b/i;
 // Checkpoint 20 — the trailing noun is now REQUIRED, not optional: caught
 // live, "Find my report task" (a Tasks-capability phrase) was matching this
 // regex (the optional noun group let ANY "find my X" through) and being
@@ -176,6 +176,20 @@ export function isAmbiguousCalendarConfirmPhrase(text: string): boolean {
 export function isCalendarRejectPhrase(text: string): boolean {
   const t = text.trim().toLowerCase();
   return /^(no|don'?t (?:do (?:that|it)|create it|update it|delete it)|never mind|abort|stop)\.?!?$/.test(t);
+}
+
+/**
+ * Checkpoint 21 fix — an UNAMBIGUOUS, Calendar-specific cancel phrase:
+ * names "the meeting"/"the event"/"the appointment"/"the calendar"
+ * explicitly, so it's safe to act on regardless of what else is pending
+ * (Gmail's cancel vocabulary never names those nouns; Tasks' doesn't
+ * either). See gmail/intent.ts's isGmailSpecificCancelPhrase for why this
+ * exists — a dual Calendar+Gmail pending state (orchestration Pattern 3)
+ * needs a way to clear just one half.
+ */
+export function isCalendarSpecificCancelPhrase(text: string): boolean {
+  const t = text.trim().toLowerCase().replace(/[.,!?]+$/, '');
+  return /^(cancel|don'?t (?:create|schedule|book|update)) the (meeting|event|appointment|calendar)$/.test(t);
 }
 
 function resolveCreateTiming(text: string): Pick<CalendarIntent, 'proposedStart' | 'proposedEnd' | 'dayPartOnly' | 'needsClarification' | 'durationMinutes'> {

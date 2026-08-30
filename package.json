@@ -54,6 +54,8 @@
     "test:voice-tasks": "tsx src/scripts/test-checkpoint20-voice-tasks.ts",
     "test:tasks-plural-regression": "tsx src/scripts/test-checkpoint20-tasks-plural-regression.ts",
     "test:production-ui-path": "tsx src/scripts/test-checkpoint20-production-ui-path.ts",
+    "test:orchestration": "tsx src/scripts/test-checkpoint21-orchestration.ts",
+    "test:orchestration-fixes": "tsx src/scripts/test-checkpoint21-fixes.ts",
     "test:paraphrase-classifier": "tsx src/scripts/test-checkpoint20-paraphrase-classifier.ts"
   },
   "keywords": [],

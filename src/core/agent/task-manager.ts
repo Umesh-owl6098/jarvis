@@ -15,7 +15,7 @@ import { classifyGoal } from './goal-state';
 import { decomposeTask, validatePlan, type TaskPlan } from './subgoal';
 import { runTaskPlan } from './subgoal-runner';
 import { nanoid } from 'nanoid';
-import { detectGmailIntent, isSendConfirmationPhrase, isUnambiguousSendPhrase, isSendCancelPhrase } from '@/core/capabilities/gmail/intent';
+import { detectGmailIntent, isSendConfirmationPhrase, isUnambiguousSendPhrase, isSendCancelPhrase, isGmailSpecificCancelPhrase } from '@/core/capabilities/gmail/intent';
 import { runGmailIntent } from '@/core/capabilities/gmail/runner';
 import { getGmailClient, gmailAvailability } from '@/core/capabilities/gmail/resolve';
 import { pendingActionStore } from '@/core/capabilities/gmail/pending-action';
@@ -24,6 +24,7 @@ import {
   unambiguousCalendarPhraseType,
   isAmbiguousCalendarConfirmPhrase,
   isCalendarRejectPhrase,
+  isCalendarSpecificCancelPhrase,
 } from '@/core/capabilities/calendar/intent';
 import { runCalendarIntent } from '@/core/capabilities/calendar/runner';
 import { getCalendarClient, calendarAvailability } from '@/core/capabilities/calendar/resolve';
@@ -34,11 +35,14 @@ import {
   unambiguousTasksPhraseType,
   isAmbiguousTasksConfirmPhrase,
   isTasksRejectPhrase,
+  isTasksSpecificCancelPhrase,
 } from '@/core/capabilities/tasks/intent';
 import { runTasksIntent } from '@/core/capabilities/tasks/runner';
 import { getTasksClient, tasksAvailability } from '@/core/capabilities/tasks/resolve';
 import { tasksPendingActionStore, type TasksPendingActionType } from '@/core/capabilities/tasks/pending-action';
 import { formatDueDate } from '@/core/capabilities/tasks/datetime';
+import { tryOrchestration } from './orchestrator';
+import { isCancelAllPhrase, activePendingCapabilities, clearPending, describeAmbiguousCancel } from '@/core/capabilities/shared/multi-pending';
 
 export interface RunTaskOptions {
   goal: string;
@@ -553,6 +557,39 @@ async function attemptGmail(goal: string, taskId: string, onEvent: EventListener
   }
 }
 
+/**
+ * Checkpoint 21 — wraps a matched OrchestrationResult into the same
+ * ExecutionResult shape single-capability paths return. Every mutation a
+ * step produced already went through its own capability's REAL
+ * PendingAction store (see orchestrator.ts) — this function only reports;
+ * it never itself creates, sends, or confirms anything.
+ */
+async function attemptOrchestration(goal: string, taskId: string, onEvent: EventListener, signal: AbortSignal | undefined, orchestration: NonNullable<Awaited<ReturnType<typeof tryOrchestration>>>): Promise<ExecutionResult> {
+  const eventType = orchestration.status === 'failed' ? 'agent.failed' : 'agent.completed';
+  onEvent({ type: eventType, timestamp: Date.now(), taskId, data: { result: orchestration.summaryText, capability: 'orchestration' as any } });
+
+  return {
+    taskId,
+    goal,
+    status: orchestration.status === 'failed' ? 'failed' : 'success',
+    outcome: orchestration.status === 'completed' ? 'completed' : orchestration.status === 'failed' ? 'failed' : 'blocked',
+    result: orchestration.summaryText,
+    steps: 0,
+    tokensUsed: 0,
+    // Checkpoint 21 fix — a step's `status` alone can misleadingly read as
+    // "nothing real happened" (a Gmail draft step is 'pending_confirmation',
+    // same as a purely in-memory Calendar/Tasks proposal) even though it
+    // already performed a real backend write (see OrchestrationStepResult.
+    // remoteWriteOccurred's own comment). Tagged explicitly here so nothing
+    // downstream can honestly claim "zero real mutations" when a real
+    // Gmail draft was created.
+    actions: orchestration.steps.map((s) => `${s.capability}:${s.id} (${s.status}${s.remoteWriteOccurred ? ', REMOTE WRITE OCCURRED' : ''})`),
+    events: [],
+    capability: { selected: 'orchestration', reason: `Orchestrated multi-step request (pattern: ${orchestration.pattern}).`, readAttempted: false, browserFallbackUsed: false },
+    orchestration: { pattern: orchestration.pattern, status: orchestration.status, steps: orchestration.steps },
+  };
+}
+
 export async function runTask(options: RunTaskOptions): Promise<ExecutionResult> {
   const { goal, onEvent, signal, taskId: providedTaskId } = options;
   console.log(`[integrity] runTask.task=${JSON.stringify(goal)} len=${goal.length}`);
@@ -633,9 +670,30 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
     // ambiguous bare word it can't uniquely resolve.
   }
 
-  // Explicit rejection phrases similarly share some vocabulary ("no",
-  // "stop", "never mind") — same exactly-one-active tiebreak, now 3-way.
-  if (isCalendarRejectPhrase(goal) && calendarPendingActive && !gmailPendingActive && !tasksPendingActive) {
+  // Checkpoint 21 fix — capability-UNAMBIGUOUS cancel phrases (the phrase's
+  // own noun names the capability specifically — "cancel the meeting",
+  // "cancel the email") are checked FIRST, unconditionally: needed because
+  // orchestration Pattern 3 can leave a Calendar proposal AND a Gmail
+  // draft pending SIMULTANEOUSLY, something no single-capability flow
+  // could produce before this checkpoint, and the old bare-word tier below
+  // requires exactly one store active to act on anything at all — it could
+  // never clear just one half of a dual-pending state.
+  if (isCancelAllPhrase(goal)) {
+    const active = activePendingCapabilities();
+    if (active.length > 0) {
+      for (const cap of active) clearPending(cap);
+      const taskId = providedTaskId || nanoid();
+      const resultText = `Cancelled ${active.map((c) => (c === 'calendar' ? 'the calendar change' : c === 'gmail' ? 'the email draft' : 'the task change')).join(' and ')} — nothing was changed.`;
+      onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'orchestration' as any } });
+      return {
+        taskId, goal, status: 'success', outcome: 'completed', result: resultText,
+        steps: 0, tokensUsed: 0, actions: [], events: [],
+        capability: { selected: 'orchestration', reason: 'Explicit cancellation of all pending actions.', readAttempted: false, browserFallbackUsed: false },
+      };
+    }
+    // nothing was pending — fall through to normal routing, same as the ambiguous tier's zero-active case below.
+  }
+  if (isCalendarSpecificCancelPhrase(goal) && calendarPendingActive) {
     calendarPendingActionStore.clear();
     const taskId = providedTaskId || nanoid();
     const resultText = 'Cancelled — the calendar change was not made.';
@@ -646,18 +704,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
       capability: { selected: 'calendar', reason: 'Explicit cancellation of a pending Calendar action.', readAttempted: false, browserFallbackUsed: false },
     };
   }
-  if (isTasksRejectPhrase(goal) && tasksPendingActive && !gmailPendingActive && !calendarPendingActive) {
-    tasksPendingActionStore.clear();
-    const taskId = providedTaskId || nanoid();
-    const resultText = 'Cancelled — the task change was not made.';
-    onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'tasks' } });
-    return {
-      taskId, goal, status: 'success', outcome: 'completed', result: resultText,
-      steps: 0, tokensUsed: 0, actions: [], events: [],
-      capability: { selected: 'tasks', reason: 'Explicit cancellation of a pending Tasks action.', readAttempted: false, browserFallbackUsed: false },
-    };
-  }
-  if (isSendCancelPhrase(goal) && gmailPendingActive && !calendarPendingActive && !tasksPendingActive) {
+  if (isGmailSpecificCancelPhrase(goal) && gmailPendingActive) {
     pendingActionStore.clear();
     const taskId = providedTaskId || nanoid();
     const resultText = 'Cancelled — the draft was not sent.';
@@ -669,11 +716,96 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
       gmail: { operation: 'send' },
     };
   }
+  if (isTasksSpecificCancelPhrase(goal) && tasksPendingActive) {
+    tasksPendingActionStore.clear();
+    const taskId = providedTaskId || nanoid();
+    const resultText = 'Cancelled — the task change was not made.';
+    onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'tasks' } });
+    return {
+      taskId, goal, status: 'success', outcome: 'completed', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [],
+      capability: { selected: 'tasks', reason: 'Explicit cancellation of a pending Tasks action.', readAttempted: false, browserFallbackUsed: false },
+    };
+  }
+
+  // Ambiguous/bare reject vocabulary ("no", "stop", "never mind", "don't
+  // create it", plain "cancel") is shared across all three capabilities by
+  // necessity — same "exactly one active" idea as the confirm side above,
+  // but now explicit about the 2+-active case instead of silently falling
+  // through: §9's "do not guess" applies to cancellation exactly as much
+  // as to confirmation. Checked only after the unambiguous, noun-specific
+  // phrases above already had their chance.
+  const isAmbiguousCancel = isCalendarRejectPhrase(goal) || isTasksRejectPhrase(goal) || isSendCancelPhrase(goal);
+  if (isAmbiguousCancel) {
+    const active = activePendingCapabilities();
+    if (active.length === 1) {
+      const cap = active[0];
+      const taskId = providedTaskId || nanoid();
+      if (cap === 'calendar') {
+        calendarPendingActionStore.clear();
+        const resultText = 'Cancelled — the calendar change was not made.';
+        onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'calendar' } });
+        return {
+          taskId, goal, status: 'success', outcome: 'completed', result: resultText,
+          steps: 0, tokensUsed: 0, actions: [], events: [],
+          capability: { selected: 'calendar', reason: 'Explicit cancellation of a pending Calendar action.', readAttempted: false, browserFallbackUsed: false },
+        };
+      }
+      if (cap === 'gmail') {
+        pendingActionStore.clear();
+        const resultText = 'Cancelled — the draft was not sent.';
+        onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'gmail' } });
+        return {
+          taskId, goal, status: 'success', outcome: 'completed', result: resultText,
+          steps: 0, tokensUsed: 0, actions: [], events: [],
+          capability: { selected: 'gmail', reason: 'Explicit cancellation of a pending Gmail send.', readAttempted: false, browserFallbackUsed: false },
+          gmail: { operation: 'send' },
+        };
+      }
+      tasksPendingActionStore.clear();
+      const resultText = 'Cancelled — the task change was not made.';
+      onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'tasks' } });
+      return {
+        taskId, goal, status: 'success', outcome: 'completed', result: resultText,
+        steps: 0, tokensUsed: 0, actions: [], events: [],
+        capability: { selected: 'tasks', reason: 'Explicit cancellation of a pending Tasks action.', readAttempted: false, browserFallbackUsed: false },
+      };
+    }
+    if (active.length >= 2) {
+      // NEW — a bare "cancel"/"no" with 2+ pendings must never guess which
+      // one; asks explicitly and clears NOTHING until the user says which
+      // (or "cancel both"/"cancel all", handled above).
+      const taskId = providedTaskId || nanoid();
+      const resultText = describeAmbiguousCancel(active);
+      onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'orchestration' as any } });
+      return {
+        taskId, goal, status: 'success', outcome: 'blocked', result: resultText,
+        steps: 0, tokensUsed: 0, actions: [], events: [],
+        capability: { selected: 'orchestration', reason: 'Ambiguous cancellation — multiple pending actions active.', readAttempted: false, browserFallbackUsed: false },
+      };
+    }
+    // zero active — fall through to normal routing, exactly as before this checkpoint.
+  }
   // Any other new task text while something is pending is NOT authorization
   // to act — §9's "do not carry confirmation across unrelated turns" —
   // falls through to normal routing below. Pending actions stay intact
   // (not cleared) so a genuine confirmation can still arrive on a LATER
   // turn within its TTL; only an explicit reject or the TTL itself clears it.
+
+  // Checkpoint 21 — a small, fixed set of compound-request shapes is tried
+  // BEFORE any single-capability check: a compound sentence often contains
+  // a clause that would, on its own, satisfy Calendar's or Gmail's own
+  // classifier (e.g. "What do I have tomorrow, and remind me to..." embeds
+  // a complete Calendar-list clause), so checking single-capability
+  // detectors first would silently truncate the request to just that
+  // clause. tryOrchestration() only ever matches its small fixed grammar —
+  // anything else returns null immediately (cheap, no side effects) and
+  // falls through to the unchanged single-capability/browser routing below.
+  const orchestration = await tryOrchestration(goal, signal);
+  if (orchestration) {
+    const taskId = providedTaskId || nanoid();
+    return attemptOrchestration(goal, taskId, onEvent, signal, orchestration);
+  }
 
   // Checkpoint 18/20 §7/§14 — Calendar and Tasks intent are both checked
   // before Gmail's and before subgoal decomposition, for the same reason

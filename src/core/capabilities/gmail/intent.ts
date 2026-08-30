@@ -85,20 +85,46 @@ const SUMMARIZE_RE = /\bsummarize\b.{0,20}\b(?:thread|email|message)\b(?:\s+with
 // Concept vocabulary for the shared query-shape classifier below. Includes
 // verb forms (emailed/emailing) so "Who emailed me today?" still matches —
 // \bemails?\b alone does NOT match "emailed" (different word, trailing -ed).
-const GMAIL_CONCEPT_RE = /\bemail(?:s|ed|ing)?\b|\bmails?\b|\binbox\b/i;
+export const GMAIL_CONCEPT_RE = /\bemail(?:s|ed|ing)?\b|\bmails?\b|\binbox\b/i;
 const TEMPORAL_ONLY_RE = /^(?:today|tomorrow|yesterday|this week|last week|next week|recently)\.?$/i;
 
-/** A sender NAME the user explicitly asked about — "from X" or "what did X email me" — never a guess, and never a temporal word ("emails from today") misread as a name. */
+/**
+ * Post-Checkpoint-21 fix — a name explicitly named via "from X" or "did X
+ * email me" means the SENDER field, not "this word appears anywhere in the
+ * message." Caught live: "Find the latest email from Anthropic" matched 10
+ * unrelated emails purely because their BODY text happened to mention
+ * "Anthropic," none of them actually from Anthropic. Gmail's own search
+ * syntax has a native `from:` operator that restricts to the sender field —
+ * every "from X" extraction below now builds `from:X` instead of a bare
+ * full-text term, so both the real Gmail API (which understands `from:`
+ * natively) and the mock (taught the same operator — see mock-client.ts)
+ * search sender metadata specifically, not full text, when the user said
+ * "from." An explicit non-"from" full-text search (e.g. "find email about
+ * invoices") is completely unaffected — only the sender-specific extraction
+ * changes.
+ */
+function toSenderQuery(name: string): string {
+  const trimmed = name.trim();
+  return trimmed.includes(' ') ? `from:"${trimmed}"` : `from:${trimmed}`;
+}
+
+/** A sender NAME the user explicitly asked about — "from X" or "what did X email me" — never a guess, and never a temporal word ("emails from today") misread as a name. Returns a Gmail from:-scoped query, not a bare name. */
 function extractGmailSender(t: string): string | undefined {
   const didMatch = /\b(?:what\s+did|did)\s+((?!i\b|you\b|we\b|they\b|he\b|she\b)[\w'-]+(?:\s+[\w'-]+)?)\s+email(?:ed)?\s+me\b/i.exec(t);
-  if (didMatch) return didMatch[1].trim();
+  if (didMatch) return toSenderQuery(didMatch[1]);
 
   const fromMatch = /\bfrom\s+([^\n?.!]+)/i.exec(t);
   if (fromMatch) {
     const candidate = fromMatch[1].replace(/[.,!?]+$/g, '').trim();
-    if (candidate && !TEMPORAL_ONLY_RE.test(candidate)) return candidate;
+    if (candidate && !TEMPORAL_ONLY_RE.test(candidate)) return toSenderQuery(candidate);
   }
   return undefined;
+}
+
+/** Strips a from:/from:"..." prefix back off for a human-readable display of what was searched — the query sent to the client stays from:-scoped; only the shown text is friendlier. */
+export function humanizeSenderQuery(q: string): string {
+  const m = /^from:"([^"]+)"$/.exec(q) ?? /^from:(\S+)$/.exec(q);
+  return m ? `from ${m[1]}` : q;
 }
 
 function parseRecipients(text: string): string[] {
@@ -136,6 +162,22 @@ export function isSendConfirmationPhrase(text: string): boolean {
 export function isSendCancelPhrase(text: string): boolean {
   const t = text.trim().toLowerCase();
   return /^(no|don'?t send( it)?|cancel|stop|never mind)\.?!?$/.test(t);
+}
+
+/**
+ * Checkpoint 21 fix — an UNAMBIGUOUS, Gmail-specific cancel phrase: names
+ * "send" or "the email"/"the draft" explicitly, so it's safe to act on
+ * regardless of what else is pending (Calendar's/Tasks' own cancel
+ * vocabulary never uses "send" or names an email/draft). Needed because
+ * Pattern 3's orchestration can leave a Calendar proposal AND a Gmail
+ * draft pending simultaneously — the old bare "no"/"cancel"/"never mind"
+ * tier requires exactly one store active to act at all, so it could never
+ * clear just the Gmail half of a dual-pending state. This is checked
+ * BEFORE that ambiguous tier, unconditionally.
+ */
+export function isGmailSpecificCancelPhrase(text: string): boolean {
+  const t = text.trim().toLowerCase().replace(/[.,!?]+$/, '');
+  return /^(cancel|don'?t send) the (email|draft|message)$/.test(t) || /^don'?t send( it| the email)?$/.test(t);
 }
 
 /**
@@ -190,7 +232,13 @@ export function detectGmailIntent(task: string): GmailIntent | null {
 
   const qualifiedMatch = SEARCH_QUALIFIED_RE.exec(t);
   if (qualifiedMatch) {
-    const query = [qualifiedMatch[1], qualifiedMatch[2], qualifiedMatch[3]].filter(Boolean).map((s) => s!.trim()).join(' ');
+    // group1 = explicit "from X" (sender-scoped, see toSenderQuery's
+    // comment), group2 = an optional trailing "about X" alongside it,
+    // group3 = a bare "about X" with no "from" clause at all — that one
+    // stays plain full-text, since Gmail has no generic "about:" operator.
+    const fromPart = qualifiedMatch[1] ? toSenderQuery(qualifiedMatch[1].trim()) : undefined;
+    const aboutPart = (qualifiedMatch[2] ?? qualifiedMatch[3])?.trim();
+    const query = [fromPart, aboutPart].filter(Boolean).join(' ');
     if (query) {
       return { operation: 'search', raw: t, searchQuery: query, max: 10 };
     }
