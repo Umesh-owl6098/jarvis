@@ -10,6 +10,8 @@ import { calendarPendingActionStore } from '@/core/capabilities/calendar/pending
 import { getCalendarClient } from '@/core/capabilities/calendar/resolve';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -22,28 +24,28 @@ async function main() {
   {
     const controller = new AbortController();
     controller.abort();
-    const r = await runTask({ goal: 'What do I have today?', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'What do I have today?', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
     check('A. list cancelled before it starts — reports stopped', r.status === 'stopped', `status=${r.status}`);
   }
 
   // ---------- B: cancelled before a proposal is built ----------
   {
-    calendarPendingActionStore.clear();
+    calendarPendingActionStore.clear(SID);
     const controller = new AbortController();
     controller.abort();
-    const r = await runTask({ goal: 'Jarvis, schedule a meeting tomorrow at 9 AM for 30 minutes.', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Jarvis, schedule a meeting tomorrow at 9 AM for 30 minutes.', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
     check(
       'B. proposal cancelled before creation — stopped, no pending action',
-      r.status === 'stopped' && !calendarPendingActionStore.active(),
-      `status=${r.status} pendingActive=${!!calendarPendingActionStore.active()}`
+      r.status === 'stopped' && !calendarPendingActionStore.active(SID),
+      `status=${r.status} pendingActive=${!!calendarPendingActionStore.active(SID)}`
     );
   }
 
   // ---------- C: an event already accepted must NEVER be reported as cancelled afterward ----------
   {
-    calendarPendingActionStore.clear();
-    await runTask({ goal: 'Jarvis, schedule a meeting tomorrow at 6 AM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
-    const first = await runTask({ goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
+    calendarPendingActionStore.clear(SID);
+    await runTask({ sessionId: SID, goal: 'Jarvis, schedule a meeting tomorrow at 6 AM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    const first = await runTask({ sessionId: SID, goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
     const client = getCalendarClient();
     const found = await client.searchEvents('Meeting', 20);
     const eventCountAfterFirst = found.events.length;

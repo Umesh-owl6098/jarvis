@@ -27,6 +27,8 @@ import { runTask } from '@/core/agent/task-manager';
 import { nanoid } from 'nanoid';
 import type { ExecutionResult } from '@/core/agent/executor';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -39,7 +41,7 @@ function browserWasInvoked(r: ExecutionResult): boolean {
 }
 
 async function expectCapability(goal: string, capability: string, label: string) {
-  const r = await runTask({ goal, onEvent: () => {}, taskId: nanoid() });
+  const r = await runTask({ sessionId: SID, goal, onEvent: () => {}, taskId: nanoid() });
   check(
     `${label}: "${goal}" -> ${capability}, browser never invoked`,
     r.capability?.selected === capability && !browserWasInvoked(r),
@@ -96,7 +98,7 @@ async function main() {
   // ---------- negative/collision cases: broader matching must not steal genuine browser requests ----------
   console.log('\n=== negative: genuine browser/informational requests stay on browser ===');
   {
-    const r = await runTask({ goal: 'What is email marketing?', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'What is email marketing?', onEvent: () => {}, taskId: nanoid() });
     check(
       'NEG. "What is email marketing?" never claimed by Gmail (no personal/temporal signal)',
       r.capability?.selected !== 'gmail',
@@ -104,7 +106,7 @@ async function main() {
     );
   }
   {
-    const r = await runTask({ goal: 'What is a calendar?', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'What is a calendar?', onEvent: () => {}, taskId: nanoid() });
     check(
       'NEG. "What is a calendar?" never claimed by Calendar (no personal/temporal signal)',
       r.capability?.selected !== 'calendar',
@@ -112,7 +114,7 @@ async function main() {
     );
   }
   {
-    const r = await runTask({ goal: 'What is a task manager?', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'What is a task manager?', onEvent: () => {}, taskId: nanoid() });
     check(
       'NEG. "What is a task manager?" never claimed by Tasks (no personal/temporal signal)',
       r.capability?.selected !== 'tasks',

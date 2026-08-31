@@ -13,11 +13,20 @@ export type StreamCallback = (event: StreamEvent) => void;
 export async function streamAgentTask(
   goal: string,
   onEvent: StreamCallback,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  sessionId?: string
 ): Promise<ExecutionResult | undefined> {
   const response = await fetch('/api/agent/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // Checkpoint 22 fix — the same opaque per-tab session id every command
+      // from this UI session carries, typed or voice alike (see page.tsx).
+      // Omitted only if the caller genuinely has none yet; the server treats
+      // a missing/invalid header as its own isolated one-off session rather
+      // than any shared default.
+      ...(sessionId ? { 'X-Jarvis-Session-Id': sessionId } : {}),
+    },
     body: JSON.stringify({ goal }),
     signal,
   });

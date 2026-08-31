@@ -14,6 +14,8 @@ import { detectGmailIntent } from '@/core/capabilities/gmail/intent';
 import { runTask } from '@/core/agent/task-manager';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -39,19 +41,19 @@ async function main() {
 
   // ---------- M (end-to-end): the same phrases actually route through runTask() to the right capability ----------
   {
-    const r1 = await runTask({ goal: 'Schedule a meeting tomorrow at 3 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    const r1 = await runTask({ sessionId: SID, goal: 'Schedule a meeting tomorrow at 3 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
     check('M-e2e. "Schedule a meeting..." -> capability=calendar', r1.capability?.selected === 'calendar', `capability=${r1.capability?.selected}`);
 
-    const r2 = await runTask({ goal: 'Remind me to submit the report tomorrow.', onEvent: () => {}, taskId: nanoid() });
+    const r2 = await runTask({ sessionId: SID, goal: 'Remind me to submit the report tomorrow.', onEvent: () => {}, taskId: nanoid() });
     check('M-e2e. "Remind me to submit..." -> capability=tasks', r2.capability?.selected === 'tasks', `capability=${r2.capability?.selected}`);
 
-    const r3 = await runTask({ goal: 'What meetings do I have tomorrow?', onEvent: () => {}, taskId: nanoid() });
+    const r3 = await runTask({ sessionId: SID, goal: 'What meetings do I have tomorrow?', onEvent: () => {}, taskId: nanoid() });
     check('M-e2e. "What meetings..." -> capability=calendar', r3.capability?.selected === 'calendar', `capability=${r3.capability?.selected}`);
 
-    const r4 = await runTask({ goal: 'What do I need to do tomorrow?', onEvent: () => {}, taskId: nanoid() });
+    const r4 = await runTask({ sessionId: SID, goal: 'What do I need to do tomorrow?', onEvent: () => {}, taskId: nanoid() });
     check('M-e2e. "What do I need to do..." -> capability=tasks', r4.capability?.selected === 'tasks', `capability=${r4.capability?.selected}`);
 
-    const r5 = await runTask({ goal: 'Am I free tomorrow at 3?', onEvent: () => {}, taskId: nanoid() });
+    const r5 = await runTask({ sessionId: SID, goal: 'Am I free tomorrow at 3?', onEvent: () => {}, taskId: nanoid() });
     check('M-e2e. "Am I free..." -> capability=calendar', r5.capability?.selected === 'calendar', `capability=${r5.capability?.selected}`);
   }
 
@@ -69,7 +71,7 @@ async function main() {
     check(`N. "${text}" -> GMAIL only, never Calendar or Tasks`, gmail && !cal && !tasks, `gmail=${gmail} calendar=${cal} tasks=${tasks}`);
   }
   {
-    const r = await runTask({ goal: 'Draft an email to Alice saying remind me tomorrow', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Draft an email to Alice saying remind me tomorrow', onEvent: () => {}, taskId: nanoid() });
     check('N-e2e. Gmail draft body regression stays on the Gmail capability end-to-end', r.capability?.selected === 'gmail', `capability=${r.capability?.selected}`);
   }
 

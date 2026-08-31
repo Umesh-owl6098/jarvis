@@ -26,6 +26,8 @@ import { detectTasksIntent } from '@/core/capabilities/tasks/intent';
 import { tasksPendingActionStore } from '@/core/capabilities/tasks/pending-action';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -50,25 +52,25 @@ async function main() {
 
   // ---------- end-to-end: routes to the Tasks capability, not the generic browser fallback ----------
   {
-    tasksPendingActionStore.clear();
-    const r = await runTask({ goal: 'Mark JARVIS Tasks Regression Check complete.', onEvent: () => {}, taskId: nanoid() });
+    tasksPendingActionStore.clear(SID);
+    const r = await runTask({ sessionId: SID, goal: 'Mark JARVIS Tasks Regression Check complete.', onEvent: () => {}, taskId: nanoid() });
     check(
       '4. end-to-end: routes to capability=tasks (not browser), finds the single real match, proposes completion',
       r.capability?.selected === 'tasks' && /MARK COMPLETE — READY FOR CONFIRMATION/.test(r.result) && /JARVIS Tasks Regression Check/.test(r.result),
       `capability=${r.capability?.selected} result=${r.result.slice(0, 200)}`
     );
-    tasksPendingActionStore.clear();
+    tasksPendingActionStore.clear(SID);
   }
 
   // ---------- AND-of-terms search still finds it even with "task(s)" stripped from the query ----------
   {
-    const r = await runTask({ goal: 'Delete my JARVIS Tasks Regression Check task.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Delete my JARVIS Tasks Regression Check task.', onEvent: () => {}, taskId: nanoid() });
     check(
       '5. delete proposal correctly targets the one real match, not "no matching task found"',
       /TASK DELETION READY FOR CONFIRMATION/.test(r.result) && /JARVIS Tasks Regression Check/.test(r.result),
       `result=${r.result.slice(0, 200)}`
     );
-    tasksPendingActionStore.clear();
+    tasksPendingActionStore.clear(SID);
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

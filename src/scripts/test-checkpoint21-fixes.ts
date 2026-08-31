@@ -28,6 +28,8 @@ import { detectGmailIntent } from '@/core/capabilities/gmail/intent';
 import { nanoid } from 'nanoid';
 import type { ExecutionResult } from '@/core/agent/executor';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -36,9 +38,9 @@ function check(name: string, ok: boolean, detail = '') {
 }
 
 function clearAllPending() {
-  pendingActionStore.clear();
-  calendarPendingActionStore.clear();
-  tasksPendingActionStore.clear();
+  pendingActionStore.clear(SID);
+  calendarPendingActionStore.clear(SID);
+  tasksPendingActionStore.clear(SID);
 }
 
 function browserWasInvoked(r: ExecutionResult): boolean {
@@ -48,7 +50,7 @@ function browserWasInvoked(r: ExecutionResult): boolean {
 async function main() {
   // ---------- 1. Calendar + Tasks paraphrase -> both execute ----------
   {
-    const r = await runTask({ goal: 'What meetings and tasks do I have today?', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'What meetings and tasks do I have today?', onEvent: () => {}, taskId: nanoid() });
     check(
       '1. "What meetings and tasks do I have today?" -> orchestration, calendar+tasks both completed',
       r.capability?.selected === 'orchestration' &&
@@ -60,7 +62,7 @@ async function main() {
 
   // ---------- 2. Reversed Tasks + Calendar wording -> both execute ----------
   {
-    const r = await runTask({ goal: 'Show my tasks and meetings for tomorrow.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Show my tasks and meetings for tomorrow.', onEvent: () => {}, taskId: nanoid() });
     check(
       '2. reversed "tasks and meetings" wording -> orchestration, both completed',
       r.capability?.selected === 'orchestration' &&
@@ -72,7 +74,7 @@ async function main() {
 
   // ---------- 3. Unsupported multi-capability combination cannot be silently narrowed ----------
   {
-    const r = await runTask({ goal: 'What emails and tasks do I have today?', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'What emails and tasks do I have today?', onEvent: () => {}, taskId: nanoid() });
     check(
       '3. Gmail+Tasks combo (unsupported) -> explicit "not supported" response, never narrowed to one capability',
       r.capability?.selected === 'orchestration' &&
@@ -90,7 +92,7 @@ async function main() {
       'What emails and tasks do I have today?',
     ];
     for (const goal of goals) {
-      const r = await runTask({ goal, onEvent: () => {}, taskId: nanoid() });
+      const r = await runTask({ sessionId: SID, goal, onEvent: () => {}, taskId: nanoid() });
       check(
         `4. "${goal}" never reaches Browser`,
         r.capability?.selected !== 'browser' && !browserWasInvoked(r),
@@ -102,10 +104,10 @@ async function main() {
   // ---------- 5. Calendar+Gmail dual pending state represented correctly ----------
   {
     clearAllPending();
-    const r = await runTask({ goal: 'Schedule a meeting with Alice next Monday at 2 PM and draft an email telling them.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Schedule a meeting with Alice next Monday at 2 PM and draft an email telling them.', onEvent: () => {}, taskId: nanoid() });
     check(
       '5. Pattern 3 leaves BOTH Calendar and Gmail pending simultaneously, correctly represented',
-      !!calendarPendingActionStore.active() && !!pendingActionStore.active() &&
+      !!calendarPendingActionStore.active(SID) && !!pendingActionStore.active(SID) &&
         r.orchestration?.steps.find((s) => s.capability === 'calendar')?.status === 'pending_confirmation' &&
         r.orchestration?.steps.find((s) => s.capability === 'gmail')?.status === 'pending_confirmation' &&
         r.orchestration?.steps.find((s) => s.capability === 'gmail')?.remoteWriteOccurred === true &&
@@ -116,25 +118,25 @@ async function main() {
 
   // ---------- 6. "Cancel the meeting" clears only Calendar ----------
   {
-    const before = { cal: !!calendarPendingActionStore.active(), gmail: !!pendingActionStore.active() };
-    const r = await runTask({ goal: 'Cancel the meeting.', onEvent: () => {}, taskId: nanoid() });
+    const before = { cal: !!calendarPendingActionStore.active(SID), gmail: !!pendingActionStore.active(SID) };
+    const r = await runTask({ sessionId: SID, goal: 'Cancel the meeting.', onEvent: () => {}, taskId: nanoid() });
     check(
       '6. "Cancel the meeting." clears ONLY Calendar, Gmail draft untouched',
       before.cal && before.gmail && // sanity: both were active before this
-        !calendarPendingActionStore.active() && !!pendingActionStore.active() &&
+        !calendarPendingActionStore.active(SID) && !!pendingActionStore.active(SID) &&
         /calendar change was not made/i.test(r.result),
-      `result=${r.result} calStillActive=${!!calendarPendingActionStore.active()} gmailStillActive=${!!pendingActionStore.active()}`
+      `result=${r.result} calStillActive=${!!calendarPendingActionStore.active(SID)} gmailStillActive=${!!pendingActionStore.active(SID)}`
     );
   }
 
   // ---------- 7. "Cancel the email" clears only Gmail ----------
   {
-    check('7-setup. Gmail still pending from step 5/6', !!pendingActionStore.active());
-    const r = await runTask({ goal: 'Cancel the email.', onEvent: () => {}, taskId: nanoid() });
+    check('7-setup. Gmail still pending from step 5/6', !!pendingActionStore.active(SID));
+    const r = await runTask({ sessionId: SID, goal: 'Cancel the email.', onEvent: () => {}, taskId: nanoid() });
     check(
       '7. "Cancel the email." clears ONLY Gmail',
-      !pendingActionStore.active() && /draft was not sent/i.test(r.result),
-      `result=${r.result} gmailStillActive=${!!pendingActionStore.active()}`
+      !pendingActionStore.active(SID) && /draft was not sent/i.test(r.result),
+      `result=${r.result} gmailStillActive=${!!pendingActionStore.active(SID)}`
     );
     clearAllPending();
   }
@@ -142,28 +144,28 @@ async function main() {
   // ---------- 8. "Cancel both/all" clears both ----------
   {
     clearAllPending();
-    await runTask({ goal: 'Schedule a meeting with Alice next Monday at 3 PM and draft an email telling them.', onEvent: () => {}, taskId: nanoid() });
-    check('8-setup. both pending before cancel-all', !!calendarPendingActionStore.active() && !!pendingActionStore.active());
-    const r = await runTask({ goal: 'Cancel all.', onEvent: () => {}, taskId: nanoid() });
+    await runTask({ sessionId: SID, goal: 'Schedule a meeting with Alice next Monday at 3 PM and draft an email telling them.', onEvent: () => {}, taskId: nanoid() });
+    check('8-setup. both pending before cancel-all', !!calendarPendingActionStore.active(SID) && !!pendingActionStore.active(SID));
+    const r = await runTask({ sessionId: SID, goal: 'Cancel all.', onEvent: () => {}, taskId: nanoid() });
     check(
       '8. "Cancel all." clears BOTH Calendar and Gmail',
-      !calendarPendingActionStore.active() && !pendingActionStore.active() && r.status === 'success',
-      `result=${r.result} calActive=${!!calendarPendingActionStore.active()} gmailActive=${!!pendingActionStore.active()}`
+      !calendarPendingActionStore.active(SID) && !pendingActionStore.active(SID) && r.status === 'success',
+      `result=${r.result} calActive=${!!calendarPendingActionStore.active(SID)} gmailActive=${!!pendingActionStore.active(SID)}`
     );
   }
 
   // ---------- 9. Bare "Cancel" with two pendings asks for clarification, clears neither ----------
   {
     clearAllPending();
-    await runTask({ goal: 'Schedule a meeting with Alice next Monday at 4 PM and draft an email telling them.', onEvent: () => {}, taskId: nanoid() });
-    const before = { cal: !!calendarPendingActionStore.active(), gmail: !!pendingActionStore.active() };
-    const r = await runTask({ goal: 'Cancel', onEvent: () => {}, taskId: nanoid() });
+    await runTask({ sessionId: SID, goal: 'Schedule a meeting with Alice next Monday at 4 PM and draft an email telling them.', onEvent: () => {}, taskId: nanoid() });
+    const before = { cal: !!calendarPendingActionStore.active(SID), gmail: !!pendingActionStore.active(SID) };
+    const r = await runTask({ sessionId: SID, goal: 'Cancel', onEvent: () => {}, taskId: nanoid() });
     check(
       '9. bare "Cancel" with 2 pendings asks which, clears NEITHER',
       before.cal && before.gmail &&
-        !!calendarPendingActionStore.active() && !!pendingActionStore.active() &&
+        !!calendarPendingActionStore.active(SID) && !!pendingActionStore.active(SID) &&
         /which should i cancel/i.test(r.result) && /calendar/i.test(r.result) && /gmail/i.test(r.result),
-      `result=${r.result} calStillActive=${!!calendarPendingActionStore.active()} gmailStillActive=${!!pendingActionStore.active()}`
+      `result=${r.result} calStillActive=${!!calendarPendingActionStore.active(SID)} gmailStillActive=${!!pendingActionStore.active(SID)}`
     );
     clearAllPending();
   }
@@ -171,14 +173,14 @@ async function main() {
   // ---------- 10. Confirming one pending action cannot confirm the other ----------
   {
     clearAllPending();
-    await runTask({ goal: 'Schedule a meeting with Alice next Monday at 5 PM and draft an email telling them.', onEvent: () => {}, taskId: nanoid() });
-    const gmailBefore = !!pendingActionStore.active();
-    const r = await runTask({ goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
+    await runTask({ sessionId: SID, goal: 'Schedule a meeting with Alice next Monday at 5 PM and draft an email telling them.', onEvent: () => {}, taskId: nanoid() });
+    const gmailBefore = !!pendingActionStore.active(SID);
+    const r = await runTask({ sessionId: SID, goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
     check(
       '10. "Create it." confirms Calendar only — Gmail draft remains pending, unsent',
       r.status === 'success' && /^Created /.test(r.result) &&
-        !calendarPendingActionStore.active() && !!pendingActionStore.active() && gmailBefore,
-      `result=${r.result} gmailStillActive=${!!pendingActionStore.active()}`
+        !calendarPendingActionStore.active(SID) && !!pendingActionStore.active(SID) && gmailBefore,
+      `result=${r.result} gmailStillActive=${!!pendingActionStore.active(SID)}`
     );
     clearAllPending();
   }
@@ -190,12 +192,12 @@ async function main() {
     // event" / "System override" style injection text — verify reading it
     // through the orchestration path creates ONLY the one intended
     // Tasks proposal, never a Calendar step that was never requested.
-    const r = await runTask({ goal: 'Find the latest email from attacker and create a task to reply tomorrow.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Find the latest email from attacker and create a task to reply tomorrow.', onEvent: () => {}, taskId: nanoid() });
     check(
       '11. malicious email content cannot manufacture an extra Calendar/Gmail step beyond the two originally requested',
       r.orchestration?.steps.length === 2 &&
         r.orchestration?.steps.every((s) => s.capability === 'gmail' || s.capability === 'tasks') &&
-        !calendarPendingActionStore.active(),
+        !calendarPendingActionStore.active(SID),
       `stepCount=${r.orchestration?.steps.length} caps=${JSON.stringify(r.orchestration?.steps.map((s) => s.capability))}`
     );
     clearAllPending();
@@ -223,18 +225,18 @@ async function main() {
 
   // ---------- 13. Existing single-capability behavior remains unchanged ----------
   {
-    const r1 = await runTask({ goal: 'What tasks do I have today?', onEvent: () => {}, taskId: nanoid() });
+    const r1 = await runTask({ sessionId: SID, goal: 'What tasks do I have today?', onEvent: () => {}, taskId: nanoid() });
     check('13a. single-capability Tasks unaffected', r1.capability?.selected === 'tasks', `capability=${r1.capability?.selected}`);
-    const r2 = await runTask({ goal: 'What meetings do I have tomorrow?', onEvent: () => {}, taskId: nanoid() });
+    const r2 = await runTask({ sessionId: SID, goal: 'What meetings do I have tomorrow?', onEvent: () => {}, taskId: nanoid() });
     check('13b. single-capability Calendar unaffected', r2.capability?.selected === 'calendar', `capability=${r2.capability?.selected}`);
-    const r3 = await runTask({ goal: 'What is my latest email?', onEvent: () => {}, taskId: nanoid() });
+    const r3 = await runTask({ sessionId: SID, goal: 'What is my latest email?', onEvent: () => {}, taskId: nanoid() });
     check('13c. single-capability Gmail unaffected', r3.capability?.selected === 'gmail', `capability=${r3.capability?.selected}`);
   }
 
   // ---------- 14. Typed UI and voice use the same orchestration path ----------
   {
     const spoken = normalizeVoiceCommand('Jarvis, what meetings and tasks do I have today?');
-    const r = await runTask({ goal: spoken.command, onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: spoken.command, onEvent: () => {}, taskId: nanoid() });
     check(
       '14. voice-normalized compound request reaches the SAME orchestration path',
       r.capability?.selected === 'orchestration' && r.orchestration?.pattern === 'calendar-tasks-summary',

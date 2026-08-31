@@ -9,6 +9,8 @@ import { calendarPendingActionStore } from '@/core/capabilities/calendar/pending
 import { getCalendarClient } from '@/core/capabilities/calendar/resolve';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -19,10 +21,10 @@ function check(name: string, ok: boolean, detail = '') {
 async function main() {
   // ---------- A: "Schedule a meeting with Alice tomorrow at 3" -> resolve, proposal, confirmation required ----------
   {
-    calendarPendingActionStore.clear();
+    calendarPendingActionStore.clear(SID);
     const client = getCalendarClient();
     const before = await client.listEvents(new Date().toISOString(), new Date(Date.now() + 30 * 86400000).toISOString(), 'UTC', 100);
-    const r = await runTask({ goal: 'Schedule a meeting with Alice tomorrow at 4 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Schedule a meeting with Alice tomorrow at 4 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
     const after = await client.listEvents(new Date().toISOString(), new Date(Date.now() + 30 * 86400000).toISOString(), 'UTC', 100);
     check(
       'A. name resolves via Contacts, attendee shown in proposal, NO event created yet',
@@ -37,30 +39,30 @@ async function main() {
 
   // ---------- B: ambiguous "John Smith" -> clarification, no proposal/create ----------
   {
-    calendarPendingActionStore.clear();
-    const r = await runTask({ goal: 'Schedule a meeting with John Smith tomorrow at 5 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    calendarPendingActionStore.clear(SID);
+    const r = await runTask({ sessionId: SID, goal: 'Schedule a meeting with John Smith tomorrow at 5 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
     check(
       'B. ambiguous contact -> clarification, no pending action, no proposal built',
-      r.outcome === 'blocked' && /Which one/i.test(r.result) && !calendarPendingActionStore.active(),
+      r.outcome === 'blocked' && /Which one/i.test(r.result) && !calendarPendingActionStore.active(SID),
       `outcome=${r.outcome} result=${r.result.slice(0, 200)}`
     );
   }
 
   // ---------- C: missing contact -> clarification ----------
   {
-    calendarPendingActionStore.clear();
-    const r = await runTask({ goal: 'Schedule a meeting with Zorblax tomorrow at 6 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    calendarPendingActionStore.clear(SID);
+    const r = await runTask({ sessionId: SID, goal: 'Schedule a meeting with Zorblax tomorrow at 6 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
     check(
       'C. unknown name -> clarification, no proposal built',
-      r.outcome === 'blocked' && /couldn't find/i.test(r.result) && !calendarPendingActionStore.active(),
+      r.outcome === 'blocked' && /couldn't find/i.test(r.result) && !calendarPendingActionStore.active(SID),
       `outcome=${r.outcome} result=${r.result.slice(0, 200)}`
     );
   }
 
   // ---------- D: explicit email still works exactly as before ----------
   {
-    calendarPendingActionStore.clear();
-    const r = await runTask({ goal: 'Schedule a meeting with explicit@example.com tomorrow at 7 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    calendarPendingActionStore.clear(SID);
+    const r = await runTask({ sessionId: SID, goal: 'Schedule a meeting with explicit@example.com tomorrow at 7 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
     check(
       'D. explicit email bypasses Contacts entirely, works exactly as Checkpoint 18',
       r.status === 'success' && /EVENT READY FOR CONFIRMATION/.test(r.result) && /explicit@example\.com/.test(r.result) && r.resolution === undefined,
@@ -70,10 +72,10 @@ async function main() {
 
   // ---------- E: double-confirmation protection unchanged for a Contacts-resolved proposal ----------
   {
-    calendarPendingActionStore.clear();
-    await runTask({ goal: 'Schedule a meeting with Alice tomorrow at 8 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
-    const first = await runTask({ goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
-    const second = await runTask({ goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
+    calendarPendingActionStore.clear(SID);
+    await runTask({ sessionId: SID, goal: 'Schedule a meeting with Alice tomorrow at 8 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    const first = await runTask({ sessionId: SID, goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
+    const second = await runTask({ sessionId: SID, goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
     check(
       'E. create-confirmation/idempotency behavior is unchanged for a Contacts-resolved proposal',
       first.status === 'success' && /^Created /.test(first.result) && /no pending/i.test(second.result),

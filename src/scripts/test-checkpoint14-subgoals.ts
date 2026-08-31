@@ -16,6 +16,8 @@ import path from 'path';
 import http from 'http';
 import { createReadStream } from 'fs';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -48,7 +50,7 @@ async function main() {
       const task = `open http://localhost:${port}/test-fixture-gs-search.html, search for the first result, open it, and what is the final page title`;
       const d = decomposeTask(task);
       check('A. decomposes into a multi-subgoal plan', !!d && 'subgoals' in d, JSON.stringify(d && 'subgoals' in d ? d.subgoals.map((s) => s.type) : d));
-      const r = await runTask({ goal: task, onEvent: () => {}, signal: new AbortController().signal });
+      const r = await runTask({ sessionId: SID, goal: task, onEvent: () => {}, signal: new AbortController().signal });
       check(
         'A. navigate->search->select->open->extract completes with a real title',
         r.status === 'success' && !!(r as any).taskPlan,
@@ -59,7 +61,7 @@ async function main() {
     // ---------- B: select cheapest -> open committed target -> extract name ----------
     {
       const task = `open http://localhost:${port}/test-fixture-gs-deals.html, select the cheapest item, open it, and tell me the product name`;
-      const r = await runTask({ goal: task, onEvent: () => {}, signal: new AbortController().signal });
+      const r = await runTask({ sessionId: SID, goal: task, onEvent: () => {}, signal: new AbortController().signal });
       const plan = (r as any).taskPlan as TaskPlan | undefined;
       const selectSg = plan?.subgoals.find((s) => s.type === 'select');
       check(

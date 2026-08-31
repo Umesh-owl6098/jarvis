@@ -29,7 +29,7 @@ import {
 import { runCalendarIntent } from '@/core/capabilities/calendar/runner';
 import { getCalendarClient, calendarAvailability } from '@/core/capabilities/calendar/resolve';
 import { calendarPendingActionStore, type CalendarPendingActionType } from '@/core/capabilities/calendar/pending-action';
-import { formatLocal } from '@/core/capabilities/calendar/datetime';
+import { formatLocal, resolveDayPhrase } from '@/core/capabilities/calendar/datetime';
 import {
   detectTasksIntent,
   unambiguousTasksPhraseType,
@@ -43,12 +43,25 @@ import { tasksPendingActionStore, type TasksPendingActionType } from '@/core/cap
 import { formatDueDate } from '@/core/capabilities/tasks/datetime';
 import { tryOrchestration } from './orchestrator';
 import { isCancelAllPhrase, activePendingCapabilities, clearPending, describeAmbiguousCancel } from '@/core/capabilities/shared/multi-pending';
+import { conversationContext } from './conversation-context';
+import { isStartOverPhrase, resolveConversationContext } from './context-resolver';
+import { attemptProposalRevision } from './proposal-revision';
 
 export interface RunTaskOptions {
   goal: string;
   onEvent: EventListener;
   signal?: AbortSignal;
   taskId?: string;
+  /**
+   * Checkpoint 22 fix — the opaque per-browser-tab/UI-session id (see
+   * session.ts) every conversational-context and pending-action lookup in
+   * this file is keyed by. Required, deliberately: an optional field with
+   * an implicit default would silently re-create the exact cross-session
+   * leak this checkpoint fixes the moment any caller forgot to pass one.
+   * Every direct caller — the real HTTP route AND every test script — must
+   * state its session explicitly.
+   */
+  sessionId: string;
 }
 
 /**
@@ -104,10 +117,10 @@ async function attemptRead(
  * atomic — a second confirmation racing in behind the first sees nothing
  * to claim and gets an honest "already sent" response, never a duplicate.
  */
-async function attemptGmailSendConfirmation(goal: string, taskId: string, onEvent: EventListener, signal?: AbortSignal): Promise<ExecutionResult> {
+async function attemptGmailSendConfirmation(goal: string, taskId: string, onEvent: EventListener, signal: AbortSignal | undefined, sessionId: string): Promise<ExecutionResult> {
   onEvent({ type: 'task.started', timestamp: Date.now(), taskId, data: { task: goal, capability: 'gmail' } });
 
-  const action = pendingActionStore.claim();
+  const action = pendingActionStore.claim(sessionId);
   if (!action) {
     const resultText = 'There is no pending email waiting to be sent (it may have already been sent, cancelled, or expired) — nothing was sent.';
     onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'gmail' } });
@@ -166,10 +179,10 @@ async function attemptGmailSendConfirmation(goal: string, taskId: string, onEven
  * state change happens, and an abort is only ever honored if the client
  * itself throws BEFORE that mutation is accepted — never claimed after.
  */
-async function attemptCalendarConfirmation(goal: string, taskId: string, onEvent: EventListener, signal?: AbortSignal): Promise<ExecutionResult> {
+async function attemptCalendarConfirmation(goal: string, taskId: string, onEvent: EventListener, signal: AbortSignal | undefined, sessionId: string): Promise<ExecutionResult> {
   onEvent({ type: 'task.started', timestamp: Date.now(), taskId, data: { task: goal, capability: 'calendar' } });
 
-  const action = calendarPendingActionStore.claim();
+  const action = calendarPendingActionStore.claim(sessionId);
   if (!action) {
     // Nothing was pending, so there's no way to know which operation the
     // stale/repeat phrase would have confirmed — omitting `calendar`
@@ -235,10 +248,10 @@ async function attemptCalendarConfirmation(goal: string, taskId: string, onEvent
  * Tasks state change happens, and an abort is only ever honored if the
  * client itself throws BEFORE that mutation is accepted.
  */
-async function attemptTasksConfirmation(goal: string, taskId: string, onEvent: EventListener, signal?: AbortSignal): Promise<ExecutionResult> {
+async function attemptTasksConfirmation(goal: string, taskId: string, onEvent: EventListener, signal: AbortSignal | undefined, sessionId: string): Promise<ExecutionResult> {
   onEvent({ type: 'task.started', timestamp: Date.now(), taskId, data: { task: goal, capability: 'tasks' } });
 
-  const action = tasksPendingActionStore.claim();
+  const action = tasksPendingActionStore.claim(sessionId);
   if (!action) {
     const resultText = 'There is no pending task action waiting to be confirmed (it may have already been completed, cancelled, or expired) — nothing changed.';
     onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'tasks' } });
@@ -305,7 +318,7 @@ async function attemptTasksConfirmation(goal: string, taskId: string, onEvent: E
  * are never reachable from this function (see attemptTasksConfirmation
  * above for the ONLY mutation path).
  */
-async function attemptTasks(goal: string, taskId: string, onEvent: EventListener, signal?: AbortSignal): Promise<ExecutionResult> {
+async function attemptTasks(goal: string, taskId: string, onEvent: EventListener, signal: AbortSignal | undefined, sessionId: string): Promise<ExecutionResult> {
   onEvent({ type: 'task.started', timestamp: Date.now(), taskId, data: { task: goal, capability: 'tasks' } });
 
   const availability = tasksAvailability();
@@ -351,7 +364,7 @@ async function attemptTasks(goal: string, taskId: string, onEvent: EventListener
         : outcome.proposalCreated.kind === 'update' ? 'tasks_update'
         : outcome.proposalCreated.kind === 'complete' ? 'tasks_complete'
         : 'tasks_delete';
-      const created = tasksPendingActionStore.set({ type, proposal: outcome.proposalCreated.proposal, createdAt: Date.now() });
+      const created = tasksPendingActionStore.set(sessionId, { type, proposal: outcome.proposalCreated.proposal, createdAt: Date.now() });
       pendingAction = { type, title: created.proposal.title, due: created.proposal.due, confirmationRequired: true };
     }
 
@@ -391,7 +404,7 @@ async function attemptTasks(goal: string, taskId: string, onEvent: EventListener
  * reachable from this function (see attemptCalendarConfirmation above for
  * the ONLY mutation path).
  */
-async function attemptCalendar(goal: string, taskId: string, onEvent: EventListener, signal?: AbortSignal): Promise<ExecutionResult> {
+async function attemptCalendar(goal: string, taskId: string, onEvent: EventListener, signal: AbortSignal | undefined, sessionId: string): Promise<ExecutionResult> {
   onEvent({ type: 'task.started', timestamp: Date.now(), taskId, data: { task: goal, capability: 'calendar' } });
 
   const availability = calendarAvailability();
@@ -434,7 +447,7 @@ async function attemptCalendar(goal: string, taskId: string, onEvent: EventListe
     if (outcome.proposalCreated) {
       const type: CalendarPendingActionType =
         outcome.proposalCreated.kind === 'create' ? 'calendar_create' : outcome.proposalCreated.kind === 'update' ? 'calendar_update' : 'calendar_delete';
-      const created = calendarPendingActionStore.set({ type, proposal: outcome.proposalCreated.proposal, createdAt: Date.now() });
+      const created = calendarPendingActionStore.set(sessionId, { type, proposal: outcome.proposalCreated.proposal, createdAt: Date.now() });
       pendingAction = { type, title: created.proposal.title, start: created.proposal.start, confirmationRequired: true };
     }
 
@@ -474,7 +487,7 @@ async function attemptCalendar(goal: string, taskId: string, onEvent: EventListe
  * here is read-only or draft-only; sendDraft() is never reachable from this
  * function (see attemptGmailSendConfirmation above for the ONLY send path).
  */
-async function attemptGmail(goal: string, taskId: string, onEvent: EventListener, signal?: AbortSignal): Promise<ExecutionResult> {
+async function attemptGmail(goal: string, taskId: string, onEvent: EventListener, signal: AbortSignal | undefined, sessionId: string): Promise<ExecutionResult> {
   onEvent({ type: 'task.started', timestamp: Date.now(), taskId, data: { task: goal, capability: 'gmail' } });
 
   const availability = gmailAvailability();
@@ -516,7 +529,7 @@ async function attemptGmail(goal: string, taskId: string, onEvent: EventListener
 
     let pendingAction: { type: 'gmail_send'; recipient: string[]; subject: string; confirmationRequired: true } | undefined;
     if (outcome.draftCreated) {
-      const created = pendingActionStore.set({
+      const created = pendingActionStore.set(sessionId, {
         type: 'gmail_send',
         draftId: outcome.draftCreated.draftId,
         recipient: outcome.draftCreated.recipients,
@@ -590,8 +603,110 @@ async function attemptOrchestration(goal: string, taskId: string, onEvent: Event
   };
 }
 
+/**
+ * Checkpoint 22 — builds the minimal, privacy-safe conversational-context
+ * snapshot from a completed turn's own already-typed result fields
+ * (never re-reads retrieved content) and pushes it for the NEXT turn's
+ * follow-up resolution. Runs after every turn that touched a capability;
+ * a browser/read result doesn't feed conversational context in this
+ * checkpoint (out of scope — only Gmail/Calendar/Tasks/orchestration
+ * follow-ups are supported).
+ */
+function updateContextFromResult(effectiveGoal: string, result: ExecutionResult, sessionId: string): void {
+  const cap = result.capability?.selected;
+  if (cap !== 'calendar' && cap !== 'gmail' && cap !== 'tasks' && cap !== 'orchestration') return;
+
+  let operation = 'unknown';
+  if (result.calendar) operation = result.calendar.operation;
+  else if (result.tasks) operation = result.tasks.operation;
+  else if (result.gmail) operation = result.gmail.operation;
+  else if (result.orchestration) operation = result.orchestration.pattern;
+
+  const day = resolveDayPhrase(effectiveGoal);
+  const dateRef = day ? { daysFromNow: day.daysFromNow, label: day.label } : undefined;
+
+  const contactRef = result.resolution
+    ? {
+        query: result.resolution.query,
+        email: result.resolution.status === 'resolved' ? result.resolution.email : undefined,
+        ambiguous: result.resolution.status === 'ambiguous' || result.resolution.status === 'ambiguous_email',
+      }
+    : undefined;
+
+  conversationContext.push(sessionId, { capability: cap, operation, dateRef, contactRef });
+}
+
 export async function runTask(options: RunTaskOptions): Promise<ExecutionResult> {
-  const { goal, onEvent, signal, taskId: providedTaskId } = options;
+  const rawGoal = options.goal;
+  const { onEvent, signal, taskId: providedTaskId, sessionId } = options;
+
+  // Checkpoint 22 fix — deterministic, request-scoped cleanup: every turn
+  // sweeps expired entries out of every session-keyed store (conversational
+  // context and all three PendingAction stores) so the underlying Maps
+  // cannot grow forever as sessions come and go. No background timer —
+  // pruning ties to real traffic, which keeps it trivially deterministic
+  // to test (see test-checkpoint22-session-isolation.ts's pruning cases).
+  conversationContext.pruneAllExpired();
+  pendingActionStore.pruneExpired();
+  calendarPendingActionStore.pruneExpired();
+  tasksPendingActionStore.pruneExpired();
+
+  // Checkpoint 22 §"Context expiry/reset" — "Forget that."/"Start over."
+  // clears ONLY the new conversational-reference state (dateRef/
+  // contactRef/etc) for THIS session — never real Gmail/Calendar/Tasks
+  // data, never another session's context, and deliberately never a
+  // capability's own PendingAction store either (those already have their
+  // own explicit, separate cancel mechanism from Checkpoint 21 —
+  // conflating the two would let a vague "start over" accidentally clear a
+  // real pending mutation the user never explicitly rejected).
+  if (isStartOverPhrase(rawGoal)) {
+    const taskId = providedTaskId || nanoid();
+    conversationContext.clear(sessionId);
+    const resultText = 'Cleared conversational context — starting fresh. (Any pending Gmail/Calendar/Tasks confirmation, if you have one, is untouched — cancel it explicitly if you want that gone too.)';
+    onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'orchestration' as any } });
+    return {
+      taskId, goal: rawGoal, status: 'success', outcome: 'completed', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [],
+      capability: { selected: 'orchestration', reason: 'Explicit reset of conversational context.', readAttempted: false, browserFallbackUsed: false },
+    };
+  }
+
+  // Checkpoint 22 — conversational revision of an EXISTING pending
+  // proposal ("Make that 3 PM", "Make it shorter") operates directly on
+  // pending state; it never goes through goal-rewriting since it edits a
+  // structured proposal object, not natural language. Checked before
+  // context resolution/routing since its trigger vocabulary ("make
+  // that/it X") doesn't collide with anything else.
+  const revision = await attemptProposalRevision(rawGoal, providedTaskId, onEvent, signal, sessionId);
+  if (revision) return revision;
+
+  // Checkpoint 22 — bounded reference resolution (pronouns, "what about
+  // Friday?"-style date follow-ups). May rewrite the goal into a fully-
+  // specified command for the EXISTING routing below to parse normally,
+  // or block with an explicit clarification (never a guess) — see
+  // context-resolver.ts. Returns null far more often than not, in which
+  // case the ORIGINAL goal text proceeds completely unchanged.
+  const contextResolution = resolveConversationContext(rawGoal, sessionId);
+  if (contextResolution?.blocked) {
+    const taskId = providedTaskId || nanoid();
+    onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: contextResolution.blocked, capability: 'orchestration' as any } });
+    return {
+      taskId, goal: rawGoal, status: 'success', outcome: 'blocked', result: contextResolution.blocked,
+      steps: 0, tokensUsed: 0, actions: [], events: [],
+      capability: { selected: 'orchestration', reason: 'Ambiguous or unresolved conversational reference.', readAttempted: false, browserFallbackUsed: false },
+    };
+  }
+  const effectiveGoal = contextResolution?.rewrittenGoal ?? rawGoal;
+
+  const result = await runTaskCore({ ...options, goal: effectiveGoal });
+  updateContextFromResult(effectiveGoal, result, sessionId);
+  // The user's OWN words are what gets reported/logged, not the internal
+  // rewrite — same discipline voice normalization already uses elsewhere.
+  return { ...result, goal: rawGoal };
+}
+
+async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
+  const { goal, onEvent, signal, taskId: providedTaskId, sessionId } = options;
   console.log(`[integrity] runTask.task=${JSON.stringify(goal)} len=${goal.length}`);
 
   // Checkpoint 17/18/20 §9 — UNAMBIGUOUS phrases ("send it", "create it",
@@ -606,12 +721,40 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   // two are resolved together via the exactly-one-active tiebreak below
   // rather than a fixed priority order — never guessing which capability a
   // shared phrase refers to.
-  const gmailPendingActive = !!pendingActionStore.active();
-  const calendarPendingActive = !!calendarPendingActionStore.active();
-  const tasksPendingActive = !!tasksPendingActionStore.active();
+  const gmailPendingActive = !!pendingActionStore.active(sessionId);
+  const calendarPendingActive = !!calendarPendingActionStore.active(sessionId);
+  const tasksPendingActive = !!tasksPendingActionStore.active(sessionId);
 
-  const calendarPhraseType = unambiguousCalendarPhraseType(goal);
-  const tasksPhraseType = unambiguousTasksPhraseType(goal);
+  // Checkpoint 22 fix — a confirm phrase is only genuinely UNAMBIGUOUS when
+  // it names the SAME action type as what's actually pending. Caught via
+  // careful review while wiring CP22's new "cancel it"/"cancel that"
+  // rejection phrasing: unambiguousCalendarPhraseType("cancel it") returns
+  // 'calendar_delete' unconditionally, but attemptCalendarConfirmation
+  // executes whatever the STORED pending action's own .type says — so
+  // "Cancel it." against a pending calendar_create proposal (e.g. from
+  // "Schedule a meeting...") would have been silently treated as an
+  // unambiguous CONFIRM and actually CREATED the event, exactly backwards
+  // from the user's evident intent to reject it. When the phrase's implied
+  // type doesn't match what's actually pending, it's no longer
+  // unambiguous — falls through to the reject/ambiguous tier below, where
+  // "cancel it" is now correctly recognized as a REJECTION instead. When
+  // NOTHING is pending at all, the phrase still passes through unchanged
+  // so the existing honest "nothing pending" report is preserved exactly.
+  function calendarPhraseMatchesPending(phraseType: CalendarPendingActionType | null): CalendarPendingActionType | null {
+    if (!phraseType) return null;
+    const active = calendarPendingActionStore.active(sessionId);
+    if (!active) return phraseType;
+    return active.type === phraseType ? phraseType : null;
+  }
+  function tasksPhraseMatchesPending(phraseType: TasksPendingActionType | null): TasksPendingActionType | null {
+    if (!phraseType) return null;
+    const active = tasksPendingActionStore.active(sessionId);
+    if (!active) return phraseType;
+    return active.type === phraseType ? phraseType : null;
+  }
+
+  const calendarPhraseType = calendarPhraseMatchesPending(unambiguousCalendarPhraseType(goal));
+  const tasksPhraseType = tasksPhraseMatchesPending(unambiguousTasksPhraseType(goal));
   if (calendarPhraseType || tasksPhraseType) {
     if (calendarPhraseType && tasksPhraseType) {
       // Shared vocabulary ("create it"/"update it"/"delete it") — resolve
@@ -623,24 +766,24 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
       // "don't guess" rule below.
       if (tasksPendingActive && !calendarPendingActive) {
         const taskId = providedTaskId || nanoid();
-        return attemptTasksConfirmation(goal, taskId, onEvent, signal);
+        return attemptTasksConfirmation(goal, taskId, onEvent, signal, sessionId);
       }
       if (!(calendarPendingActive && tasksPendingActive)) {
         const taskId = providedTaskId || nanoid();
-        return attemptCalendarConfirmation(goal, taskId, onEvent, signal);
+        return attemptCalendarConfirmation(goal, taskId, onEvent, signal, sessionId);
       }
       // both active — genuinely ambiguous, fall through to unrelated routing.
     } else if (calendarPhraseType) {
       const taskId = providedTaskId || nanoid();
-      return attemptCalendarConfirmation(goal, taskId, onEvent, signal);
+      return attemptCalendarConfirmation(goal, taskId, onEvent, signal, sessionId);
     } else {
       const taskId = providedTaskId || nanoid();
-      return attemptTasksConfirmation(goal, taskId, onEvent, signal);
+      return attemptTasksConfirmation(goal, taskId, onEvent, signal, sessionId);
     }
   }
   if (isUnambiguousSendPhrase(goal)) {
     const taskId = providedTaskId || nanoid();
-    return attemptGmailSendConfirmation(goal, taskId, onEvent, signal);
+    return attemptGmailSendConfirmation(goal, taskId, onEvent, signal, sessionId);
   }
 
   // AMBIGUOUS bare words ("yes", "confirm", "go ahead") share vocabulary
@@ -655,15 +798,15 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
     if (activeCount === 1) {
       if (calendarPendingActive) {
         const taskId = providedTaskId || nanoid();
-        return attemptCalendarConfirmation(goal, taskId, onEvent, signal);
+        return attemptCalendarConfirmation(goal, taskId, onEvent, signal, sessionId);
       }
       if (gmailPendingActive) {
         const taskId = providedTaskId || nanoid();
-        return attemptGmailSendConfirmation(goal, taskId, onEvent, signal);
+        return attemptGmailSendConfirmation(goal, taskId, onEvent, signal, sessionId);
       }
       if (tasksPendingActive) {
         const taskId = providedTaskId || nanoid();
-        return attemptTasksConfirmation(goal, taskId, onEvent, signal);
+        return attemptTasksConfirmation(goal, taskId, onEvent, signal, sessionId);
       }
     }
     // more than one or none active — fall through; no capability claims an
@@ -679,9 +822,9 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   // requires exactly one store active to act on anything at all — it could
   // never clear just one half of a dual-pending state.
   if (isCancelAllPhrase(goal)) {
-    const active = activePendingCapabilities();
+    const active = activePendingCapabilities(sessionId);
     if (active.length > 0) {
-      for (const cap of active) clearPending(cap);
+      for (const cap of active) clearPending(sessionId, cap);
       const taskId = providedTaskId || nanoid();
       const resultText = `Cancelled ${active.map((c) => (c === 'calendar' ? 'the calendar change' : c === 'gmail' ? 'the email draft' : 'the task change')).join(' and ')} — nothing was changed.`;
       onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'orchestration' as any } });
@@ -694,7 +837,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
     // nothing was pending — fall through to normal routing, same as the ambiguous tier's zero-active case below.
   }
   if (isCalendarSpecificCancelPhrase(goal) && calendarPendingActive) {
-    calendarPendingActionStore.clear();
+    calendarPendingActionStore.clear(sessionId);
     const taskId = providedTaskId || nanoid();
     const resultText = 'Cancelled — the calendar change was not made.';
     onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'calendar' } });
@@ -705,7 +848,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
     };
   }
   if (isGmailSpecificCancelPhrase(goal) && gmailPendingActive) {
-    pendingActionStore.clear();
+    pendingActionStore.clear(sessionId);
     const taskId = providedTaskId || nanoid();
     const resultText = 'Cancelled — the draft was not sent.';
     onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'gmail' } });
@@ -717,7 +860,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
     };
   }
   if (isTasksSpecificCancelPhrase(goal) && tasksPendingActive) {
-    tasksPendingActionStore.clear();
+    tasksPendingActionStore.clear(sessionId);
     const taskId = providedTaskId || nanoid();
     const resultText = 'Cancelled — the task change was not made.';
     onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'tasks' } });
@@ -737,12 +880,12 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   // phrases above already had their chance.
   const isAmbiguousCancel = isCalendarRejectPhrase(goal) || isTasksRejectPhrase(goal) || isSendCancelPhrase(goal);
   if (isAmbiguousCancel) {
-    const active = activePendingCapabilities();
+    const active = activePendingCapabilities(sessionId);
     if (active.length === 1) {
       const cap = active[0];
       const taskId = providedTaskId || nanoid();
       if (cap === 'calendar') {
-        calendarPendingActionStore.clear();
+        calendarPendingActionStore.clear(sessionId);
         const resultText = 'Cancelled — the calendar change was not made.';
         onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'calendar' } });
         return {
@@ -752,7 +895,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
         };
       }
       if (cap === 'gmail') {
-        pendingActionStore.clear();
+        pendingActionStore.clear(sessionId);
         const resultText = 'Cancelled — the draft was not sent.';
         onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'gmail' } });
         return {
@@ -762,7 +905,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
           gmail: { operation: 'send' },
         };
       }
-      tasksPendingActionStore.clear();
+      tasksPendingActionStore.clear(sessionId);
       const resultText = 'Cancelled — the task change was not made.';
       onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'tasks' } });
       return {
@@ -801,7 +944,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   // clause. tryOrchestration() only ever matches its small fixed grammar —
   // anything else returns null immediately (cheap, no side effects) and
   // falls through to the unchanged single-capability/browser routing below.
-  const orchestration = await tryOrchestration(goal, signal);
+  const orchestration = await tryOrchestration(goal, signal, sessionId);
   if (orchestration) {
     const taskId = providedTaskId || nanoid();
     return attemptOrchestration(goal, taskId, onEvent, signal, orchestration);
@@ -819,13 +962,13 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   const calendarIntent = detectCalendarIntent(goal);
   if (calendarIntent) {
     const taskId = providedTaskId || nanoid();
-    return attemptCalendar(goal, taskId, onEvent, signal);
+    return attemptCalendar(goal, taskId, onEvent, signal, sessionId);
   }
 
   const tasksIntent = detectTasksIntent(goal);
   if (tasksIntent) {
     const taskId = providedTaskId || nanoid();
-    return attemptTasks(goal, taskId, onEvent, signal);
+    return attemptTasks(goal, taskId, onEvent, signal, sessionId);
   }
 
   // Checkpoint 17 §6 — Gmail intent is checked before subgoal decomposition
@@ -836,7 +979,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   const gmailIntent = detectGmailIntent(goal);
   if (gmailIntent) {
     const taskId = providedTaskId || nanoid();
-    return attemptGmail(goal, taskId, onEvent, signal);
+    return attemptGmail(goal, taskId, onEvent, signal, sessionId);
   }
 
   // Checkpoint 14: only ever consider subgoal decomposition when the
@@ -914,7 +1057,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
     }
 
     console.log(`[capability] read failed (${failure}) — falling back to browser`);
-    const browserResult = await runBrowserTask({ goal, onEvent, signal, taskId });
+    const browserResult = await runBrowserTask({ goal, onEvent, signal, taskId, sessionId });
     browserResult.capability = {
       selected: 'browser',
       reason: decision.routingReason,
@@ -926,7 +1069,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
     return browserResult;
   }
 
-  const result = await runBrowserTask({ goal, onEvent, signal, taskId: providedTaskId });
+  const result = await runBrowserTask({ goal, onEvent, signal, taskId: providedTaskId, sessionId });
   result.capability = {
     selected: 'browser',
     reason: decision.routingReason,

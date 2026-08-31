@@ -175,7 +175,9 @@ export function isAmbiguousCalendarConfirmPhrase(text: string): boolean {
 /** Explicit rejection — deliberately NOT the bare word "cancel" (that's claimed by "cancel it" as the delete-confirmation phrase above); avoids the two colliding. */
 export function isCalendarRejectPhrase(text: string): boolean {
   const t = text.trim().toLowerCase();
-  return /^(no|don'?t (?:do (?:that|it)|create it|update it|delete it)|never mind|abort|stop)\.?!?$/.test(t);
+  // Checkpoint 22 — "cancel it"/"cancel that" added, same reasoning as
+  // gmail/intent.ts's isSendCancelPhrase.
+  return /^(no|don'?t (?:do (?:that|it)|create it|update it|delete it)|cancel( it| that)?|never mind|abort|stop)\.?!?$/.test(t);
 }
 
 /**

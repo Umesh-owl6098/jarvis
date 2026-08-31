@@ -40,6 +40,8 @@ import { tasksPendingActionStore } from '@/core/capabilities/tasks/pending-actio
 import { nanoid } from 'nanoid';
 import type { ExecutionResult } from '@/core/agent/executor';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -67,7 +69,7 @@ async function main() {
       'What emails did I get today?',
     ];
     for (const goal of phrases) {
-      const r = await runTask({ goal, onEvent: () => {}, taskId: nanoid() });
+      const r = await runTask({ sessionId: SID, goal, onEvent: () => {}, taskId: nanoid() });
       check(
         `1. "${goal}" -> capability=gmail, browser controller never invoked`,
         r.capability?.selected === 'gmail' && !browserWasInvoked(r),
@@ -83,7 +85,7 @@ async function main() {
       'What meetings do I have tomorrow?',
     ];
     for (const goal of phrases) {
-      const r = await runTask({ goal, onEvent: () => {}, taskId: nanoid() });
+      const r = await runTask({ sessionId: SID, goal, onEvent: () => {}, taskId: nanoid() });
       check(
         `2. "${goal}" -> capability=calendar, browser controller never invoked`,
         r.capability?.selected === 'calendar' && !browserWasInvoked(r),
@@ -94,26 +96,26 @@ async function main() {
 
   // ---------- 3: UI-path Tasks commands — capability=tasks, browser never invoked ----------
   {
-    tasksPendingActionStore.clear();
-    const r1 = await runTask({ goal: 'What tasks do I have today?', onEvent: () => {}, taskId: nanoid() });
+    tasksPendingActionStore.clear(SID);
+    const r1 = await runTask({ sessionId: SID, goal: 'What tasks do I have today?', onEvent: () => {}, taskId: nanoid() });
     check(
       '3a. "What tasks do I have today?" -> capability=tasks, browser controller never invoked',
       r1.capability?.selected === 'tasks' && !browserWasInvoked(r1),
       `capability=${r1.capability?.selected} browserInvoked=${browserWasInvoked(r1)}`
     );
 
-    const r2 = await runTask({ goal: 'Remind me to call Ramesh tomorrow.', onEvent: () => {}, taskId: nanoid() });
+    const r2 = await runTask({ sessionId: SID, goal: 'Remind me to call Ramesh tomorrow.', onEvent: () => {}, taskId: nanoid() });
     check(
       '3b. "Remind me to..." -> capability=tasks, proposal only, browser controller never invoked',
       r2.capability?.selected === 'tasks' && !browserWasInvoked(r2) && !!r2.tasks?.pendingAction,
       `capability=${r2.capability?.selected} browserInvoked=${browserWasInvoked(r2)}`
     );
-    tasksPendingActionStore.clear();
+    tasksPendingActionStore.clear(SID);
   }
 
   // ---------- 4: genuine browser command still reaches the browser capability (through the SAME entry point, not a different code path) ----------
   {
-    const r = await runTask({ goal: 'Open example.com and tell me the page title', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Open example.com and tell me the page title', onEvent: () => {}, taskId: nanoid() });
     check(
       '4. "Open example.com and tell me the page title" -> capability=browser (genuine browser task still works)',
       r.capability?.selected === 'browser' || r.capability?.selected === 'read',
@@ -128,7 +130,7 @@ async function main() {
       'Draft an email to Alice saying what tasks do I have today',
     ];
     for (const goal of phrases) {
-      const r = await runTask({ goal, onEvent: () => {}, taskId: nanoid() });
+      const r = await runTask({ sessionId: SID, goal, onEvent: () => {}, taskId: nanoid() });
       check(
         `5. "${goal}" -> capability=gmail, never calendar/tasks`,
         r.capability?.selected === 'gmail',
@@ -140,7 +142,7 @@ async function main() {
   // ---------- 6: voice goes through the identical authoritative path ----------
   {
     const spoken = normalizeVoiceCommand('Jarvis, what is my latest email?');
-    const r = await runTask({ goal: spoken.command, onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: spoken.command, onEvent: () => {}, taskId: nanoid() });
     check(
       '6. voice-normalized command reaches capability=gmail via the same runTask() path, browser never invoked',
       r.capability?.selected === 'gmail' && !browserWasInvoked(r),
@@ -150,18 +152,18 @@ async function main() {
 
   // ---------- 7: confirmation gates still work through this same production path ----------
   {
-    pendingActionStore.clear();
-    await runTask({ goal: 'Draft an email to explicit@example.com saying hello', onEvent: () => {}, taskId: nanoid() });
-    const confirm = await runTask({ goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
+    pendingActionStore.clear(SID);
+    await runTask({ sessionId: SID, goal: 'Draft an email to explicit@example.com saying hello', onEvent: () => {}, taskId: nanoid() });
+    const confirm = await runTask({ sessionId: SID, goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
     check(
       '7a. Gmail send confirmation still requires the exact phrase through this path',
       confirm.status === 'success' && /^Sent email/.test(confirm.result),
       `result=${confirm.result}`
     );
 
-    calendarPendingActionStore.clear();
-    await runTask({ goal: 'Schedule a meeting tomorrow at 9 AM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
-    const calConfirm = await runTask({ goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
+    calendarPendingActionStore.clear(SID);
+    await runTask({ sessionId: SID, goal: 'Schedule a meeting tomorrow at 9 AM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    const calConfirm = await runTask({ sessionId: SID, goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
     check(
       '7b. Calendar create confirmation still requires the exact phrase through this path',
       calConfirm.status === 'success' && /^Created /.test(calConfirm.result),

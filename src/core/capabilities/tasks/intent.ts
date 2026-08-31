@@ -167,7 +167,10 @@ export function isAmbiguousTasksConfirmPhrase(text: string): boolean {
 /** Explicit rejection — mirrors calendar/intent.ts's isCalendarRejectPhrase. */
 export function isTasksRejectPhrase(text: string): boolean {
   const t = text.trim().toLowerCase();
-  return /^(no|don'?t (?:do (?:that|it)|create it|update it|complete it|delete it)|never mind|abort|stop)\.?!?$/.test(t);
+  // Checkpoint 22 — "cancel it"/"cancel that" added, same reasoning as
+  // gmail/intent.ts's isSendCancelPhrase and calendar/intent.ts's
+  // isCalendarRejectPhrase.
+  return /^(no|don'?t (?:do (?:that|it)|create it|update it|complete it|delete it)|cancel( it| that)?|never mind|abort|stop)\.?!?$/.test(t);
 }
 
 /**

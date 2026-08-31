@@ -110,7 +110,7 @@ function summarize(steps: OrchestrationStepResult[]): string {
 
 const AFTER_MEETING_RE = /^(.+?)\s+and\s+remind me to\s+(.+?)\s+after\s+(?:my\s+)?(last|first)\s+meeting\b.*$/i;
 
-async function tryCalendarThenTaskAfterMeeting(t: string, signal?: AbortSignal): Promise<OrchestrationResult | null> {
+async function tryCalendarThenTaskAfterMeeting(t: string, signal: AbortSignal | undefined, sessionId: string): Promise<OrchestrationResult | null> {
   const m = AFTER_MEETING_RE.exec(t);
   if (!m) return null;
 
@@ -179,7 +179,7 @@ async function tryCalendarThenTaskAfterMeeting(t: string, signal?: AbortSignal):
   const notes = `Context: after your ${which} meeting that day — "${targetEvent.title}" (${formatLocal(targetEvent.start, calIntent.timezone)}–${formatLocal(targetEvent.end, calIntent.timezone)}). Google Tasks only supports a due DATE, not a specific time, so this will NOT trigger automatically right after that meeting ends.`;
 
   const proposal: TaskProposal = { kind: 'create', title, notes, due, taskListId: tasksClient.defaultListId };
-  tasksPendingActionStore.set({ type: 'tasks_create', proposal, createdAt: Date.now() });
+  tasksPendingActionStore.set(sessionId, { type: 'tasks_create', proposal, createdAt: Date.now() });
 
   steps.push({
     id: 'create-task',
@@ -198,7 +198,7 @@ async function tryCalendarThenTaskAfterMeeting(t: string, signal?: AbortSignal):
 
 const REPLY_TASK_RE = /^(.+?)\s+and\s+create a task to\s+(.+)$/i;
 
-async function tryGmailThenTaskReply(t: string, signal?: AbortSignal): Promise<OrchestrationResult | null> {
+async function tryGmailThenTaskReply(t: string, signal: AbortSignal | undefined, sessionId: string): Promise<OrchestrationResult | null> {
   const m = REPLY_TASK_RE.exec(t);
   if (!m) return null;
 
@@ -257,7 +257,7 @@ async function tryGmailThenTaskReply(t: string, signal?: AbortSignal): Promise<O
   const notes = `Re: "${top.subject}" (${top.date})`;
 
   const proposal: TaskProposal = { kind: 'create', title, notes, due, taskListId: tasksClient.defaultListId };
-  tasksPendingActionStore.set({ type: 'tasks_create', proposal, createdAt: Date.now() });
+  tasksPendingActionStore.set(sessionId, { type: 'tasks_create', proposal, createdAt: Date.now() });
 
   steps.push({
     id: 'create-task',
@@ -276,7 +276,7 @@ async function tryGmailThenTaskReply(t: string, signal?: AbortSignal): Promise<O
 
 const CAL_THEN_EMAIL_RE = /^(.+?)\s+and\s+draft an email\s+(?:telling|to)\s+(?:them|him|her)\b(.*)$/i;
 
-async function tryCalendarThenGmailPronoun(t: string, signal?: AbortSignal): Promise<OrchestrationResult | null> {
+async function tryCalendarThenGmailPronoun(t: string, signal: AbortSignal | undefined, sessionId: string): Promise<OrchestrationResult | null> {
   const m = CAL_THEN_EMAIL_RE.exec(t);
   if (!m) return null;
 
@@ -323,7 +323,7 @@ async function tryCalendarThenGmailPronoun(t: string, signal?: AbortSignal): Pro
     return { pattern: 'calendar-then-gmail-pronoun', status: 'blocked', steps, summaryText: summarize(steps) };
   }
 
-  calendarPendingActionStore.set({ type: 'calendar_create', proposal: calOutcome.proposalCreated.proposal, createdAt: Date.now() });
+  calendarPendingActionStore.set(sessionId, { type: 'calendar_create', proposal: calOutcome.proposalCreated.proposal, createdAt: Date.now() });
   steps.push({ id: 'propose-event', capability: 'calendar', description: 'Prepare calendar proposal', status: 'pending_confirmation', resultText: calOutcome.resultText });
 
   const attendeeEmail = calOutcome.proposalCreated.proposal.attendees[0];
@@ -355,7 +355,7 @@ async function tryCalendarThenGmailPronoun(t: string, signal?: AbortSignal): Pro
     steps.push({ id: 'draft-email', capability: 'gmail', description: 'Draft email', status: 'failed', resultText: `Draft creation failed: ${e?.message ?? 'unknown error'}` });
     return { pattern: 'calendar-then-gmail-pronoun', status: 'failed', steps, summaryText: summarize(steps) };
   }
-  pendingActionStore.set({ type: 'gmail_send', draftId: draft.draftId, recipient: [attendeeEmail], subject: draft.subject, createdAt: Date.now() });
+  pendingActionStore.set(sessionId, { type: 'gmail_send', draftId: draft.draftId, recipient: [attendeeEmail], subject: draft.subject, createdAt: Date.now() });
 
   steps.push({
     id: 'draft-email',
@@ -387,7 +387,7 @@ async function tryCalendarThenGmailPronoun(t: string, signal?: AbortSignal): Pro
 // phrasing naming BOTH Calendar's and Tasks' concepts, asked personally,
 // now triggers this pattern — no day phrase required (defaults to today,
 // same as before).
-async function tryCalendarTasksSummary(t: string, signal?: AbortSignal): Promise<OrchestrationResult | null> {
+async function tryCalendarTasksSummary(t: string, signal: AbortSignal | undefined, _sessionId: string): Promise<OrchestrationResult | null> {
   const compound = detectCompoundQuery(t);
   if (!compound || !compound.concepts.includes('calendar') || !compound.concepts.includes('tasks')) return null;
   // Gmail also mentioned alongside Calendar+Tasks isn't one of the 4
@@ -487,10 +487,10 @@ function buildUnsupportedCompoundResult(concepts: CapabilityConcept[]): Orchestr
  * callers fall through to the existing single-capability/browser routing,
  * completely unchanged from before this checkpoint.
  */
-export async function tryOrchestration(goal: string, signal?: AbortSignal): Promise<OrchestrationResult | null> {
+export async function tryOrchestration(goal: string, signal: AbortSignal | undefined, sessionId: string): Promise<OrchestrationResult | null> {
   const t = goal.trim();
   for (const pattern of PATTERNS) {
-    const result = await pattern(t, signal);
+    const result = await pattern(t, signal, sessionId);
     if (result) return result;
   }
   const compound = detectCompoundQuery(t);

@@ -147,6 +147,22 @@ export class RealGmailClient implements GmailClient {
     return draft;
   }
 
+  async updateDraft(draftId: string, to: string[], subject: string, body: string, cc?: string[], signal?: AbortSignal): Promise<MailDraft> {
+    const cached = this.drafts.get(draftId);
+    // §16-style idempotency guard, same reasoning as sendDraft's own — a
+    // revision must never touch an already-sent draft (Gmail's own API
+    // would reject this anyway once sent, but fail closed here first with
+    // an honest message rather than an opaque API error).
+    if (cached?.sent) {
+      throw new Error('This draft has already been sent and can no longer be revised.');
+    }
+    const raw = buildRawMessage(to, subject, body, cc);
+    const resp = await this.gmail.users.drafts.update({ userId: 'me', id: draftId, requestBody: { message: { raw } } }, { signal });
+    const draft: MailDraft = { draftId, messageId: resp.data.message?.id ?? cached?.messageId, to, cc, subject, body, createdAt: cached?.createdAt ?? Date.now(), sent: false };
+    this.drafts.set(draftId, draft);
+    return draft;
+  }
+
   async sendDraft(draftId: string, signal?: AbortSignal): Promise<{ messageId: string }> {
     const cached = this.drafts.get(draftId);
     // §16 — real-backend idempotency guard, independent of PendingActionStore.

@@ -16,6 +16,7 @@ import { SlowMockOmniRoute } from '@/core/router/mock-slow';
 import { FailingMockOmniRoute } from '@/core/router/mock-failing';
 import { resolveRouterMode, isMockMode, ROUTER_MODE_LABEL } from '@/core/router/mode';
 import { taskRegistry } from '@/core/agent/task-registry';
+import { resolveSessionId, redactSessionId } from '@/core/agent/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +39,13 @@ export async function POST(request: NextRequest) {
   }
 
   const taskId = nanoid();
+  // Checkpoint 22 fix — one opaque id per browser tab/UI session, sent by
+  // the client on every request (see src/lib/agent-stream.ts /
+  // src/app/page.tsx). A missing or malformed header NEVER falls back to a
+  // shared/fixed session — resolveSessionId() mints a fresh, isolated
+  // random id for THIS request alone in that case, so a bad/missing header
+  // can never accidentally merge one caller's conversation into another's.
+  const sessionId = resolveSessionId(request.headers.get('x-jarvis-session-id'));
   const abortController = new AbortController();
   const encoder = new TextEncoder();
   let streamClosed = false;
@@ -67,7 +75,7 @@ export async function POST(request: NextRequest) {
   const useFailingMock = routerMode === 'failing-mock';
 
   console.log(
-    `[stream] router=${ROUTER_MODE_LABEL[routerMode]} taskId=${taskId} goal=${JSON.stringify(goal)}`
+    `[stream] router=${ROUTER_MODE_LABEL[routerMode]} taskId=${taskId} session=${redactSessionId(sessionId)} goal=${JSON.stringify(goal)}`
   );
   // Command integrity: prove the operator's string is unchanged at this hop.
   console.log(
@@ -105,7 +113,7 @@ export async function POST(request: NextRequest) {
                 unsubscribe();
               }
             })()
-          : runTask({ goal, onEvent: sendEvent, signal: abortController.signal, taskId });
+          : runTask({ goal, onEvent: sendEvent, signal: abortController.signal, taskId, sessionId });
 
       taskPromise.then(result => {
         if (streamClosed) return;

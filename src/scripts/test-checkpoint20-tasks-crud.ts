@@ -9,6 +9,8 @@ import { tasksPendingActionStore } from '@/core/capabilities/tasks/pending-actio
 import { getTasksClient } from '@/core/capabilities/tasks/resolve';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -19,7 +21,7 @@ function check(name: string, ok: boolean, detail = '') {
 async function main() {
   // ---------- C: find a unique task ----------
   {
-    const r = await runTask({ goal: 'Find my report task.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Find my report task.', onEvent: () => {}, taskId: nanoid() });
     check(
       'C. find unique task — matches the "Submit report" fixture',
       r.status === 'success' && /Submit report/.test(r.result),
@@ -29,11 +31,11 @@ async function main() {
 
   // ---------- D: ambiguous duplicate title -> clarification, no proposal ----------
   {
-    tasksPendingActionStore.clear();
-    const r = await runTask({ goal: 'Mark the team sync task complete.', onEvent: () => {}, taskId: nanoid() });
+    tasksPendingActionStore.clear(SID);
+    const r = await runTask({ sessionId: SID, goal: 'Mark the team sync task complete.', onEvent: () => {}, taskId: nanoid() });
     check(
       'D. duplicate title "Team sync" -> clarification, no pending action',
-      r.outcome === 'blocked' && /Multiple tasks match/i.test(r.result) && !tasksPendingActionStore.active(),
+      r.outcome === 'blocked' && /Multiple tasks match/i.test(r.result) && !tasksPendingActionStore.active(SID),
       `outcome=${r.outcome} result=${r.result.slice(0, 200)}`
     );
   }
@@ -41,10 +43,10 @@ async function main() {
   // ---------- E: create proposal -> no mutation yet ----------
   let createdCountBefore = 0;
   {
-    tasksPendingActionStore.clear();
+    tasksPendingActionStore.clear(SID);
     const client = getTasksClient();
     createdCountBefore = (await client.listTasks(client.defaultListId, 100)).length;
-    const r = await runTask({ goal: 'Remind me to call Ramesh tomorrow.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Remind me to call Ramesh tomorrow.', onEvent: () => {}, taskId: nanoid() });
     const after = (await client.listTasks(client.defaultListId, 100)).length;
     check(
       'E. create proposal shown, NO mutation yet — task count unchanged',
@@ -57,7 +59,7 @@ async function main() {
   {
     const client = getTasksClient();
     const before = (await client.listTasks(client.defaultListId, 100)).length;
-    const r = await runTask({ goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
     const after = (await client.listTasks(client.defaultListId, 100)).length;
     check(
       'F. confirm create -> exactly one task created',
@@ -77,7 +79,7 @@ async function main() {
     // wording answers. See the final report's Known Limitations.
     const client = getTasksClient();
     const before = (await client.listTasks(client.defaultListId, 100)).length;
-    const r = await runTask({ goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
     const after = (await client.listTasks(client.defaultListId, 100)).length;
     check(
       'G. repeat "Create it." with nothing pending in either store -> no duplicate task created',
@@ -88,14 +90,14 @@ async function main() {
 
   // ---------- H: update due date proposal/confirm ----------
   {
-    tasksPendingActionStore.clear();
-    const r1 = await runTask({ goal: 'Change my passport task to Friday.', onEvent: () => {}, taskId: nanoid() });
+    tasksPendingActionStore.clear(SID);
+    const r1 = await runTask({ sessionId: SID, goal: 'Change my passport task to Friday.', onEvent: () => {}, taskId: nanoid() });
     check(
       'H1. update-due-date proposal shown, not yet applied',
       r1.status === 'success' && /TASK UPDATE READY FOR CONFIRMATION/.test(r1.result) && !!r1.tasks?.pendingAction,
       `result=${r1.result.slice(0, 200)}`
     );
-    const r2 = await runTask({ goal: 'Update it.', onEvent: () => {}, taskId: nanoid() });
+    const r2 = await runTask({ sessionId: SID, goal: 'Update it.', onEvent: () => {}, taskId: nanoid() });
     const client = getTasksClient();
     const found = await client.searchTasks('Renew passport', 5);
     check(
@@ -107,14 +109,14 @@ async function main() {
 
   // ---------- I: mark complete proposal/confirm ----------
   {
-    tasksPendingActionStore.clear();
-    const r1 = await runTask({ goal: 'Mark my design doc task complete.', onEvent: () => {}, taskId: nanoid() });
+    tasksPendingActionStore.clear(SID);
+    const r1 = await runTask({ sessionId: SID, goal: 'Mark my design doc task complete.', onEvent: () => {}, taskId: nanoid() });
     check(
       'I1. complete proposal shown, not yet applied',
       r1.status === 'success' && /MARK COMPLETE — READY FOR CONFIRMATION/.test(r1.result) && !!r1.tasks?.pendingAction,
       `result=${r1.result.slice(0, 200)}`
     );
-    const r2 = await runTask({ goal: 'Mark it complete.', onEvent: () => {}, taskId: nanoid() });
+    const r2 = await runTask({ sessionId: SID, goal: 'Mark it complete.', onEvent: () => {}, taskId: nanoid() });
     const client = getTasksClient();
     const found = await client.searchTasks('Read design doc', 5);
     check(
@@ -126,16 +128,16 @@ async function main() {
 
   // ---------- J: delete proposal/confirm ----------
   {
-    tasksPendingActionStore.clear();
+    tasksPendingActionStore.clear(SID);
     const client = getTasksClient();
     const beforeCount = (await client.searchTasks('Review PR', 5)).tasks.length;
-    const r1 = await runTask({ goal: 'Delete my Review PR task.', onEvent: () => {}, taskId: nanoid() });
+    const r1 = await runTask({ sessionId: SID, goal: 'Delete my Review PR task.', onEvent: () => {}, taskId: nanoid() });
     check(
       'J1. delete proposal shown, not yet applied',
       r1.status === 'success' && /TASK DELETION READY FOR CONFIRMATION/.test(r1.result) && !!r1.tasks?.pendingAction,
       `result=${r1.result.slice(0, 200)}`
     );
-    const r2 = await runTask({ goal: 'Delete it.', onEvent: () => {}, taskId: nanoid() });
+    const r2 = await runTask({ sessionId: SID, goal: 'Delete it.', onEvent: () => {}, taskId: nanoid() });
     const afterCount = (await client.searchTasks('Review PR', 5)).tasks.length;
     check(
       'J2. confirm delete -> task actually removed from the real fixture',

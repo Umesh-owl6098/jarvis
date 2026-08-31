@@ -59,6 +59,14 @@ export interface GmailClient {
   getMessage(id: string, signal?: AbortSignal): Promise<MailMessage | null>;
   getThread(threadId: string, signal?: AbortSignal): Promise<MailThread | null>;
   createDraft(to: string[], subject: string, body: string, cc?: string[], signal?: AbortSignal): Promise<MailDraft>;
+  /**
+   * Checkpoint 22 — revises an EXISTING draft's content in place (Gmail's
+   * own `drafts.update`), never creating a second draft. Only for content
+   * the user themselves is revising conversationally ("make it shorter")
+   * — this is still draft-only, exactly like createDraft: it can never
+   * send anything, only sendDraft() can.
+   */
+  updateDraft(draftId: string, to: string[], subject: string, body: string, cc?: string[], signal?: AbortSignal): Promise<MailDraft>;
   /** Sends an EXISTING, already-created draft — there is no "compose and send in one call" on this interface, by design (§8: draft first, always). */
   sendDraft(draftId: string, signal?: AbortSignal): Promise<{ messageId: string }>;
   getDraft(draftId: string): MailDraft | null;

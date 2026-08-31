@@ -160,6 +160,16 @@ export class MockGmailClient implements GmailClient {
     return draft;
   }
 
+  async updateDraft(draftId: string, to: string[], subject: string, body: string, cc?: string[], signal?: AbortSignal): Promise<MailDraft> {
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+    const existing = this.drafts.get(draftId);
+    if (!existing) throw new Error(`No such draft: ${draftId}`);
+    if (existing.sent) throw new Error('This draft has already been sent and can no longer be revised.');
+    const revised: MailDraft = { ...existing, to, cc, subject, body };
+    this.drafts.set(draftId, revised);
+    return revised;
+  }
+
   async sendDraft(draftId: string, signal?: AbortSignal): Promise<{ messageId: string }> {
     const draft = this.drafts.get(draftId);
     if (!draft) throw new Error(`No such draft: ${draftId}`);

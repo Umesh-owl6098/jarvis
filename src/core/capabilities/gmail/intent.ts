@@ -161,7 +161,13 @@ export function isSendConfirmationPhrase(text: string): boolean {
 /** True for an explicit refusal of a pending send — clears the pending action rather than leaving it to expire. */
 export function isSendCancelPhrase(text: string): boolean {
   const t = text.trim().toLowerCase();
-  return /^(no|don'?t send( it)?|cancel|stop|never mind)\.?!?$/.test(t);
+  // Checkpoint 22 — "cancel it"/"cancel that" added as bare, AMBIGUOUS
+  // pronoun-cancel phrasing (shares the same "exactly one pending active"
+  // multi-pending tiebreak as "cancel"/"no" already does — see
+  // task-manager.ts's ambiguous-cancel section), not the Gmail-specific
+  // unambiguous tier (isGmailSpecificCancelPhrase), since "it"/"that" name
+  // no capability specifically.
+  return /^(no|don'?t send( it)?|cancel( it| that)?|stop|never mind)\.?!?$/.test(t);
 }
 
 /**

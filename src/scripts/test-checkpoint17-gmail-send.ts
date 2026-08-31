@@ -12,6 +12,8 @@ import { pendingActionStore } from '@/core/capabilities/gmail/pending-action';
 import { getGmailClient } from '@/core/capabilities/gmail/resolve';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -20,45 +22,45 @@ function check(name: string, ok: boolean, detail = '') {
 }
 
 async function draftOnly(to: string): Promise<{ result: Awaited<ReturnType<typeof runTask>>; draftId: string | undefined }> {
-  const result = await runTask({ goal: `Draft an email to ${to} saying this is a test message.`, onEvent: () => {}, taskId: nanoid() });
-  const active = pendingActionStore.active();
+  const result = await runTask({ sessionId: SID, goal: `Draft an email to ${to} saying this is a test message.`, onEvent: () => {}, taskId: nanoid() });
+  const active = pendingActionStore.active(SID);
   return { result, draftId: active?.draftId };
 }
 
 async function main() {
   // ---------- A: draft created -> no send yet ----------
   {
-    pendingActionStore.clear();
+    pendingActionStore.clear(SID);
     const { result, draftId } = await draftOnly('sendtest-a@example.com');
     const client = getGmailClient();
     const draft = draftId ? client.getDraft(draftId) : null;
     check(
       'A. draft created — pending action set, draft NOT sent yet',
       result.status === 'success' && !!draftId && draft?.sent === false,
-      `pendingActive=${!!pendingActionStore.active()} draftSent=${draft?.sent}`
+      `pendingActive=${!!pendingActionStore.active(SID)} draftSent=${draft?.sent}`
     );
   }
 
   // ---------- B: explicit confirm -> exactly one email sent ----------
   {
-    pendingActionStore.clear();
+    pendingActionStore.clear(SID);
     const { draftId } = await draftOnly('sendtest-b@example.com');
-    const confirmResult = await runTask({ goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
+    const confirmResult = await runTask({ sessionId: SID, goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
     const client = getGmailClient();
     const draft = draftId ? client.getDraft(draftId) : null;
     check(
       'B. explicit confirmation — email actually sent, pending action consumed',
-      confirmResult.status === 'success' && draft?.sent === true && !pendingActionStore.active(),
-      `status=${confirmResult.status} sent=${draft?.sent} pendingActive=${!!pendingActionStore.active()} result=${confirmResult.result}`
+      confirmResult.status === 'success' && draft?.sent === true && !pendingActionStore.active(SID),
+      `status=${confirmResult.status} sent=${draft?.sent} pendingActive=${!!pendingActionStore.active(SID)} result=${confirmResult.result}`
     );
   }
 
   // ---------- C: no confirmation -> send blocked ----------
   {
-    pendingActionStore.clear();
+    pendingActionStore.clear(SID);
     const { draftId } = await draftOnly('sendtest-c@example.com');
     // A completely unrelated new task, NOT a confirmation phrase.
-    const unrelated = await runTask({ goal: 'Show my latest emails', onEvent: () => {}, taskId: nanoid() });
+    const unrelated = await runTask({ sessionId: SID, goal: 'Show my latest emails', onEvent: () => {}, taskId: nanoid() });
     const client = getGmailClient();
     const draft = draftId ? client.getDraft(draftId) : null;
     check(
@@ -70,15 +72,15 @@ async function main() {
 
   // ---------- D: confirmation after an unrelated task should not accidentally send ----------
   {
-    pendingActionStore.clear();
+    pendingActionStore.clear(SID);
     const { draftId } = await draftOnly('sendtest-d@example.com');
     // An unrelated task runs in between — does NOT consume or clear the
     // pending action (§9: "do not carry send authorization across
     // unrelated turns" is about the REVERSE direction — an unrelated turn
     // must not itself BECOME a confirmation, and must not be treated as
     // cancelling a still-valid pending action either).
-    await runTask({ goal: 'Show my latest emails', onEvent: () => {}, taskId: nanoid() });
-    const stillPendingBeforeConfirm = pendingActionStore.active();
+    await runTask({ sessionId: SID, goal: 'Show my latest emails', onEvent: () => {}, taskId: nanoid() });
+    const stillPendingBeforeConfirm = pendingActionStore.active(SID);
     // Snapshot the SENT VALUE now, as a boolean — getDraft() returns a
     // reference to the SAME mutable object the client mutates in place on
     // sendDraft(), so holding onto the object itself and reading .sent
@@ -88,7 +90,7 @@ async function main() {
     // Now a genuine confirmation arrives — it should still work, since the
     // pending action is still valid (unrelated task text is never itself
     // authorization, but it also doesn't silently cancel a real pending one).
-    await runTask({ goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
+    await runTask({ sessionId: SID, goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
     const client = getGmailClient();
     const draft = draftId ? client.getDraft(draftId) : null;
     check(
@@ -105,10 +107,10 @@ async function main() {
 
   // ---------- E: double confirmation -> must not duplicate-send ----------
   {
-    pendingActionStore.clear();
+    pendingActionStore.clear(SID);
     const { draftId } = await draftOnly('sendtest-e@example.com');
-    const first = await runTask({ goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
-    const second = await runTask({ goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
+    const first = await runTask({ sessionId: SID, goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
+    const second = await runTask({ sessionId: SID, goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
     const client = getGmailClient();
     const draft = draftId ? client.getDraft(draftId) : null;
     // The mailbox should contain exactly ONE sent message for this draft —
@@ -126,13 +128,13 @@ async function main() {
 
   // ---------- IDEMPOTENCY (§16): concurrent/racing confirmations for the same draft ----------
   {
-    pendingActionStore.clear();
+    pendingActionStore.clear(SID);
     const { draftId } = await draftOnly('idempotency@example.com');
     // Two confirmations fired without awaiting between them — races the
     // atomic claim() guard directly, not just sequential double-send.
     const [r1, r2] = await Promise.all([
-      runTask({ goal: 'Send it.', onEvent: () => {}, taskId: nanoid() }),
-      runTask({ goal: 'Send it.', onEvent: () => {}, taskId: nanoid() }),
+      runTask({ sessionId: SID, goal: 'Send it.', onEvent: () => {}, taskId: nanoid() }),
+      runTask({ sessionId: SID, goal: 'Send it.', onEvent: () => {}, taskId: nanoid() }),
     ]);
     const client = getGmailClient();
     const draft = draftId ? client.getDraft(draftId) : null;
@@ -146,15 +148,15 @@ async function main() {
 
   // ---------- VOICE (§11): two-turn voice-style confirmation reaches the same Gmail path ----------
   {
-    pendingActionStore.clear();
+    pendingActionStore.clear(SID);
     // Voice normalization strips the wake word before the directive ever
     // reaches runTask() (see src/lib/voice/normalize.ts / test-voice.ts) —
     // simulating that here with the already-stripped directive text is
     // exactly what the real voice pipeline hands to runTask(), proving
     // voice enters the SAME Gmail capability path, not a parallel one.
-    const draftTurn = await runTask({ goal: "draft an email to voicetest@example.com saying I'll join at three.", onEvent: () => {}, taskId: nanoid() });
-    const draftId = pendingActionStore.active()?.draftId;
-    const sendTurn = await runTask({ goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
+    const draftTurn = await runTask({ sessionId: SID, goal: "draft an email to voicetest@example.com saying I'll join at three.", onEvent: () => {}, taskId: nanoid() });
+    const draftId = pendingActionStore.active(SID)?.draftId;
+    const sendTurn = await runTask({ sessionId: SID, goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
     const client = getGmailClient();
     const draft = draftId ? client.getDraft(draftId) : null;
     check(

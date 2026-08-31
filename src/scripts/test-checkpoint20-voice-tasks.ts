@@ -11,6 +11,8 @@ import { runTask } from '@/core/agent/task-manager';
 import { tasksPendingActionStore } from '@/core/capabilities/tasks/pending-action';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -19,7 +21,7 @@ function check(name: string, ok: boolean, detail = '') {
 }
 
 async function main() {
-  tasksPendingActionStore.clear();
+  tasksPendingActionStore.clear(SID);
 
   const spoken = 'Jarvis, remind me to submit my report tomorrow.';
   const normalized = normalizeVoiceCommand(spoken);
@@ -29,7 +31,7 @@ async function main() {
     `command="${normalized.command}"`
   );
 
-  const r = await runTask({ goal: normalized.command, onEvent: () => {}, taskId: nanoid() });
+  const r = await runTask({ sessionId: SID, goal: normalized.command, onEvent: () => {}, taskId: nanoid() });
   check(
     'normalized voice command produces a proposal only — no auto-create',
     r.status === 'success' && /TASK READY FOR CONFIRMATION/.test(r.result) && !!r.tasks?.pendingAction,
@@ -39,7 +41,7 @@ async function main() {
   // A bare "create it" from voice still requires the same explicit
   // confirmation gate as typed text — no voice-only bypass.
   const confirmSpoken = normalizeVoiceCommand('Jarvis, create it.');
-  const confirmResult = await runTask({ goal: confirmSpoken.command, onEvent: () => {}, taskId: nanoid() });
+  const confirmResult = await runTask({ sessionId: SID, goal: confirmSpoken.command, onEvent: () => {}, taskId: nanoid() });
   check(
     'voice confirmation goes through the identical create-confirmation path',
     confirmResult.status === 'success' && /^Created /.test(confirmResult.result),

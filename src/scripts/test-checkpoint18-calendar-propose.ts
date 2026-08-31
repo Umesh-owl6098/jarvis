@@ -8,6 +8,8 @@ import { calendarPendingActionStore } from '@/core/capabilities/calendar/pending
 import { getCalendarClient } from '@/core/capabilities/calendar/resolve';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -18,10 +20,10 @@ function check(name: string, ok: boolean, detail = '') {
 async function main() {
   // ---------- D: proposal only — no event created yet ----------
   {
-    calendarPendingActionStore.clear();
+    calendarPendingActionStore.clear(SID);
     const client = getCalendarClient();
     const before = await client.listEvents(new Date().toISOString(), new Date(Date.now() + 30 * 86400000).toISOString(), 'UTC', 100);
-    const r = await runTask({ goal: 'Jarvis, schedule a meeting tomorrow at 10 AM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Jarvis, schedule a meeting tomorrow at 10 AM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
     const after = await client.listEvents(new Date().toISOString(), new Date(Date.now() + 30 * 86400000).toISOString(), 'UTC', 100);
     check(
       'D. proposal only — EVENT READY FOR CONFIRMATION shown, pending action set, NO event actually created',
@@ -35,11 +37,11 @@ async function main() {
 
   // ---------- E: create confirmation — event actually created ----------
   {
-    calendarPendingActionStore.clear();
-    await runTask({ goal: 'Jarvis, schedule a meeting tomorrow at 11 AM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    calendarPendingActionStore.clear(SID);
+    await runTask({ sessionId: SID, goal: 'Jarvis, schedule a meeting tomorrow at 11 AM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
     const client = getCalendarClient();
     const before = await client.listEvents(new Date().toISOString(), new Date(Date.now() + 30 * 86400000).toISOString(), 'UTC', 100);
-    const r = await runTask({ goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
     const after = await client.listEvents(new Date().toISOString(), new Date(Date.now() + 30 * 86400000).toISOString(), 'UTC', 100);
     check(
       'E. explicit confirmation — event actually created, count increased by exactly 1',
@@ -50,12 +52,12 @@ async function main() {
 
   // ---------- F: duplicate create blocked ----------
   {
-    calendarPendingActionStore.clear();
-    await runTask({ goal: 'Jarvis, schedule a meeting tomorrow at 1 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    calendarPendingActionStore.clear(SID);
+    await runTask({ sessionId: SID, goal: 'Jarvis, schedule a meeting tomorrow at 1 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
     const client = getCalendarClient();
     const before = await client.listEvents(new Date().toISOString(), new Date(Date.now() + 30 * 86400000).toISOString(), 'UTC', 100);
-    const first = await runTask({ goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
-    const second = await runTask({ goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
+    const first = await runTask({ sessionId: SID, goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
+    const second = await runTask({ sessionId: SID, goal: 'Create it.', onEvent: () => {}, taskId: nanoid() });
     const after = await client.listEvents(new Date().toISOString(), new Date(Date.now() + 30 * 86400000).toISOString(), 'UTC', 100);
     check(
       'F. duplicate confirmation — second "Create it." reports no pending action, exactly ONE event created',
@@ -66,16 +68,16 @@ async function main() {
 
   // ---------- K: conflict detection ----------
   {
-    calendarPendingActionStore.clear();
+    calendarPendingActionStore.clear(SID);
     // Fixture e3 "Project Sync" occupies tomorrow 3:00-3:30 PM — proposing
     // the exact same slot must surface the conflict, not silently ignore it.
-    const r = await runTask({ goal: 'Jarvis, schedule a meeting tomorrow at 3 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Jarvis, schedule a meeting tomorrow at 3 PM for 30 minutes.', onEvent: () => {}, taskId: nanoid() });
     check(
       'K. conflict detection — proposing an overlapping slot surfaces the conflict in the proposal text',
       r.status === 'success' && /CONFLICT/.test(r.result) && /Project Sync/.test(r.result),
       `result=${r.result}`
     );
-    calendarPendingActionStore.clear(); // never confirm a deliberately-conflicting test proposal
+    calendarPendingActionStore.clear(SID); // never confirm a deliberately-conflicting test proposal
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

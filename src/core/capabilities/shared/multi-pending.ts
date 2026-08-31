@@ -22,18 +22,19 @@ export type PendingCapability = 'calendar' | 'gmail' | 'tasks';
 
 const LABEL: Record<PendingCapability, string> = { calendar: 'Calendar', gmail: 'Gmail', tasks: 'Tasks' };
 
-export function activePendingCapabilities(): PendingCapability[] {
+/** Checkpoint 22 fix — every check is scoped to ONE session's own pending state; a different session's simultaneously-active pending action is invisible here. */
+export function activePendingCapabilities(sessionId: string): PendingCapability[] {
   const result: PendingCapability[] = [];
-  if (calendarPendingActionStore.active()) result.push('calendar');
-  if (pendingActionStore.active()) result.push('gmail');
-  if (tasksPendingActionStore.active()) result.push('tasks');
+  if (calendarPendingActionStore.active(sessionId)) result.push('calendar');
+  if (pendingActionStore.active(sessionId)) result.push('gmail');
+  if (tasksPendingActionStore.active(sessionId)) result.push('tasks');
   return result;
 }
 
-export function clearPending(capability: PendingCapability): void {
-  if (capability === 'calendar') calendarPendingActionStore.clear();
-  else if (capability === 'gmail') pendingActionStore.clear();
-  else tasksPendingActionStore.clear();
+export function clearPending(sessionId: string, capability: PendingCapability): void {
+  if (capability === 'calendar') calendarPendingActionStore.clear(sessionId);
+  else if (capability === 'gmail') pendingActionStore.clear(sessionId);
+  else tasksPendingActionStore.clear(sessionId);
 }
 
 /** "Cancel both." / "Cancel all." / "Never mind, cancel everything." — clears every currently-active pending action, never guesses at a subset. */

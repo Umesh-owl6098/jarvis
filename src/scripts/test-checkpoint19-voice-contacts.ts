@@ -14,6 +14,8 @@ import { runTask } from '@/core/agent/task-manager';
 import { pendingActionStore } from '@/core/capabilities/gmail/pending-action';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -22,7 +24,7 @@ function check(name: string, ok: boolean, detail = '') {
 }
 
 async function main() {
-  pendingActionStore.clear();
+  pendingActionStore.clear(SID);
 
   const spoken = 'Jarvis, draft an email to Alice saying call me later.';
   const normalized = normalizeVoiceCommand(spoken);
@@ -32,7 +34,7 @@ async function main() {
     `command="${normalized.command}"`
   );
 
-  const r = await runTask({ goal: normalized.command, onEvent: () => {}, taskId: nanoid() });
+  const r = await runTask({ sessionId: SID, goal: normalized.command, onEvent: () => {}, taskId: nanoid() });
   check(
     'normalized voice command resolves Alice via Contacts and creates a draft — no auto-send',
     r.status === 'success' && /DRAFT CREATED/.test(r.result) && /alice@example\.com/.test(r.result) && r.resolution?.status === 'resolved' && !!r.gmail?.pendingAction,
@@ -42,7 +44,7 @@ async function main() {
   // A bare "yes"/"send it" from voice still requires the same explicit
   // confirmation gate as typed text — no voice-only bypass.
   const confirmSpoken = normalizeVoiceCommand('Jarvis, send it.');
-  const confirmResult = await runTask({ goal: confirmSpoken.command, onEvent: () => {}, taskId: nanoid() });
+  const confirmResult = await runTask({ sessionId: SID, goal: confirmSpoken.command, onEvent: () => {}, taskId: nanoid() });
   check(
     'voice confirmation goes through the identical send-confirmation path, still requires the exact phrase',
     confirmResult.status === 'success' && /^Sent email to alice@example\.com/.test(confirmResult.result),

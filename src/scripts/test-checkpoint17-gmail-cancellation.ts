@@ -10,6 +10,8 @@ import { pendingActionStore } from '@/core/capabilities/gmail/pending-action';
 import { getGmailClient } from '@/core/capabilities/gmail/resolve';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -18,13 +20,13 @@ function check(name: string, ok: boolean, detail = '') {
 }
 
 async function main() {
-  pendingActionStore.clear();
+  pendingActionStore.clear(SID);
 
   // ---------- A: cancelled before a search even starts ----------
   {
     const controller = new AbortController();
     controller.abort();
-    const r = await runTask({ goal: 'Find the email from John', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Find the email from John', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
     check(
       'A. search cancelled before it starts — reports stopped, not a false completion',
       r.status === 'stopped',
@@ -36,28 +38,28 @@ async function main() {
   {
     const controller = new AbortController();
     controller.abort();
-    const r = await runTask({ goal: 'Read my latest thread', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Read my latest thread', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
     check('B. read cancelled before it starts — reports stopped', r.status === 'stopped', `status=${r.status}`);
   }
 
   // ---------- C: cancelled before a draft is created — no draft, no pending action ----------
   {
-    pendingActionStore.clear();
+    pendingActionStore.clear(SID);
     const controller = new AbortController();
     controller.abort();
-    const r = await runTask({ goal: 'Draft an email to canceltest@example.com saying hello.', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Draft an email to canceltest@example.com saying hello.', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
     check(
       'C. draft cancelled before creation — stopped, no draft created, no pending action',
-      r.status === 'stopped' && !pendingActionStore.active(),
-      `status=${r.status} pendingActive=${!!pendingActionStore.active()}`
+      r.status === 'stopped' && !pendingActionStore.active(SID),
+      `status=${r.status} pendingActive=${!!pendingActionStore.active(SID)}`
     );
   }
 
   // ---------- D: a send already accepted by Gmail must NEVER be reported as cancelled afterward ----------
   {
-    pendingActionStore.clear();
-    await runTask({ goal: 'Draft an email to cancelsend@example.com saying this should still send.', onEvent: () => {}, taskId: nanoid() });
-    const draftId = pendingActionStore.active()?.draftId;
+    pendingActionStore.clear(SID);
+    await runTask({ sessionId: SID, goal: 'Draft an email to cancelsend@example.com saying this should still send.', onEvent: () => {}, taskId: nanoid() });
+    const draftId = pendingActionStore.active(SID)?.draftId;
     // Abort ONLY after the send has already been accepted — simulated here
     // by sending first (mock resolves synchronously) and THEN checking
     // with an already-aborted signal on the confirmation call itself would
@@ -66,11 +68,11 @@ async function main() {
     // idempotency check runs BEFORE its abort check (see mock-client.ts),
     // so a second call against an already-sent draft, even with an aborted
     // signal, must report the real prior success — never "stopped."
-    const first = await runTask({ goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
+    const first = await runTask({ sessionId: SID, goal: 'Send it.', onEvent: () => {}, taskId: nanoid() });
     const controller = new AbortController();
     controller.abort();
-    pendingActionStore.set({ type: 'gmail_send', draftId: draftId!, recipient: ['cancelsend@example.com'], subject: '(no subject)', createdAt: Date.now() });
-    const second = await runTask({ goal: 'Send it.', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
+    pendingActionStore.set(SID, { type: 'gmail_send', draftId: draftId!, recipient: ['cancelsend@example.com'], subject: '(no subject)', createdAt: Date.now() });
+    const second = await runTask({ sessionId: SID, goal: 'Send it.', onEvent: () => {}, signal: controller.signal, taskId: nanoid() });
     const client = getGmailClient();
     const draft = draftId ? client.getDraft(draftId) : null;
     check(

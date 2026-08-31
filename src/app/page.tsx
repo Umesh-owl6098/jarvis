@@ -111,6 +111,20 @@ export default function Home() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const taskIdRef = useRef<string | null>(null);
   const startedAtRef = useRef<number>(0);
+  /**
+   * Checkpoint 22 fix — one opaque, random id for this JARVIS UI session,
+   * generated once per tab/mount (never persisted to sessionStorage/
+   * localStorage, so a reload intentionally starts a fresh conversational
+   * session — "one tab = one session"). Sent on every command, typed or
+   * voice, so both share the same server-side conversational context and
+   * pending-action state, and so this tab can never inherit another tab's.
+   * Never derived from the user's identity — it names a conversation, not
+   * a person.
+   */
+  const sessionIdRef = useRef<string | null>(null);
+  if (!sessionIdRef.current) {
+    sessionIdRef.current = crypto.randomUUID();
+  }
 
   /* ---------- boot gate ---------- */
   useEffect(() => {
@@ -347,7 +361,8 @@ export default function Home() {
             return prev;
           });
         },
-        abortControllerRef.current.signal
+        abortControllerRef.current.signal,
+        sessionIdRef.current ?? undefined
       );
 
       if (result) {

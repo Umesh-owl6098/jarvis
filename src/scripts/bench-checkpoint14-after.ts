@@ -9,6 +9,8 @@ import path from 'path';
 import http from 'http';
 import { createReadStream } from 'fs';
 
+const SID = 'test-session';
+
 function startStaticServer(rootDir: string, port: number): Promise<() => Promise<void>> {
   const server = http.createServer((req, res) => {
     const filePath = path.join(rootDir, decodeURIComponent((req.url ?? '/').split('?')[0]));
@@ -34,7 +36,7 @@ function withLaunchCounter<T>(fn: () => Promise<T>): Promise<{ result: T; launch
 async function runOne(label: string, task: string) {
   const controller = new AbortController();
   const start = Date.now();
-  const { result, launches } = await withLaunchCounter(() => runTask({ goal: task, onEvent: () => {}, signal: controller.signal }));
+  const { result, launches } = await withLaunchCounter(() => runTask({ sessionId: SID, goal: task, onEvent: () => {}, signal: controller.signal }));
   const durationS = ((Date.now() - start) / 1000).toFixed(1);
   const plan = (result as any).taskPlan;
   const telemetry = (result as any).subgoalTelemetry;

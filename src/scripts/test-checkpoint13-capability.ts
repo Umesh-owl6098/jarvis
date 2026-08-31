@@ -26,6 +26,8 @@ import http from 'http';
 import fs from 'fs';
 import { createReadStream } from 'fs';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -68,7 +70,7 @@ async function runViaRouter(task: string) {
   const start = Date.now();
   console.log = countingLog;
   const { result, launches } = await withLaunchCounter(() =>
-    runTask({ goal: task, onEvent: () => {}, signal: controller.signal })
+    runTask({ sessionId: SID, goal: task, onEvent: () => {}, signal: controller.signal })
   );
   console.log = origLog;
   return { result, launches, plannerCalls, durationS: ((Date.now() - start) / 1000).toFixed(1) };
@@ -220,7 +222,7 @@ async function main() {
   console.log('\n========== PART 6: cancellation ==========');
   {
     const controller = new AbortController();
-    const p = withLaunchCounter(() => runTask({ goal: 'Read example.com and tell me the title', onEvent: () => {}, signal: controller.signal }));
+    const p = withLaunchCounter(() => runTask({ sessionId: SID, goal: 'Read example.com and tell me the title', onEvent: () => {}, signal: controller.signal }));
     controller.abort();
     const { result, launches } = await p;
     check(

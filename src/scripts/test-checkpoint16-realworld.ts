@@ -10,6 +10,8 @@
 import { runTask } from '@/core/agent/task-manager';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 interface MatrixRow {
   name: string;
   status: string;
@@ -24,7 +26,7 @@ const rows: MatrixRow[] = [];
 
 async function run(name: string, goal: string): Promise<void> {
   const started = Date.now();
-  const result = await runTask({ goal, onEvent: () => {}, taskId: nanoid() });
+  const result = await runTask({ sessionId: SID, goal, onEvent: () => {}, taskId: nanoid() });
   rows.push({
     name,
     status: result.status,

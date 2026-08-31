@@ -8,6 +8,8 @@ import { runTask } from '@/core/agent/task-manager';
 import { calendarPendingActionStore } from '@/core/capabilities/calendar/pending-action';
 import { nanoid } from 'nanoid';
 
+const SID = 'test-session';
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -16,11 +18,11 @@ function check(name: string, ok: boolean, detail = '') {
 }
 
 async function main() {
-  calendarPendingActionStore.clear();
+  calendarPendingActionStore.clear(SID);
 
   // ---------- A: list events ----------
   {
-    const r = await runTask({ goal: 'What do I have today?', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'What do I have today?', onEvent: () => {}, taskId: nanoid() });
     check(
       'A. list today — completes via Calendar capability, no browser',
       r.status === 'success' && r.capability?.selected === 'calendar' && r.gmail === undefined && r.calendar?.operation === 'list',
@@ -30,7 +32,7 @@ async function main() {
 
   // ---------- B: search event ----------
   {
-    const r = await runTask({ goal: 'Find my dentist appointment', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Find my dentist appointment', onEvent: () => {}, taskId: nanoid() });
     check(
       'B. search by keyword — finds the Dentist Appointment event',
       r.status === 'success' && r.calendar?.operation === 'search' && /dentist/i.test(r.result),
@@ -40,7 +42,7 @@ async function main() {
 
   // ---------- C: free/busy ----------
   {
-    const r = await runTask({ goal: 'Am I free tomorrow at 3 PM?', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Am I free tomorrow at 3 PM?', onEvent: () => {}, taskId: nanoid() });
     check(
       'C. free/busy — correctly reports NOT free (Project Sync fixture occupies 3-3:30pm tomorrow)',
       r.status === 'success' && r.calendar?.operation === 'freebusy' && /not fully free/i.test(r.result),
@@ -48,7 +50,7 @@ async function main() {
     );
   }
   {
-    const r = await runTask({ goal: 'Am I free tomorrow at 8 AM?', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Am I free tomorrow at 8 AM?', onEvent: () => {}, taskId: nanoid() });
     check(
       'C2. free/busy — correctly reports free for an open slot',
       r.status === 'success' && /you're free/i.test(r.result),
@@ -70,7 +72,7 @@ async function main() {
 
   // ---------- routing sanity: "Open Google Calendar" must NOT be intercepted as Calendar capability ----------
   {
-    const r = await runTask({ goal: 'Open calendar.google.com', onEvent: () => {}, taskId: nanoid() });
+    const r = await runTask({ sessionId: SID, goal: 'Open calendar.google.com', onEvent: () => {}, taskId: nanoid() });
     check(
       'ROUTING. "Open calendar.google.com" is browser navigation, not the Calendar capability',
       r.capability?.selected !== 'calendar',
