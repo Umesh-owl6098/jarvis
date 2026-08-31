@@ -43,7 +43,7 @@ export interface ExecutionResult {
    * in scripts/tests that bypass task-manager.ts).
    */
   capability?: {
-    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration';
+    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'preferences';
     reason: string;
     fallbackCapability?: 'browser';
     readAttempted: boolean;
@@ -102,6 +102,18 @@ export interface ExecutionResult {
     pattern: string;
     status: 'completed' | 'partial' | 'blocked' | 'failed';
     steps: { id: string; capability: 'calendar' | 'gmail' | 'tasks'; description: string; status: 'completed' | 'pending_confirmation' | 'failed' | 'skipped_dependency'; resultText: string; remoteWriteOccurred?: boolean }[];
+  };
+  /**
+   * Checkpoint 23: set only when a User Preferences command handled this
+   * task (set/get/forget). `snapshot` is always the FULL current allowlisted
+   * preference object after the operation — never anything beyond the three
+   * known fields (see preferences/types.ts's UserPreferences), so this can
+   * never become a channel for arbitrary memory to leak into observability.
+   */
+  preferences?: {
+    operation: 'set' | 'get' | 'forget';
+    field: 'meetingDurationMinutes' | 'emailStyle' | 'defaultMeetingLocation' | 'all';
+    snapshot: { meetingDurationMinutes?: number; emailStyle?: string; defaultMeetingLocation?: string };
   };
   /**
    * Checkpoint 14: the committed target (if any), for cross-subgoal result

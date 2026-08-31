@@ -30,3 +30,7 @@ graphify-out/
 
 # Gmail OAuth tokens (Checkpoint 17) — local-only, never committed
 .gmail-token.json
+
+# User preferences (Checkpoint 23) — local-only persistent config, never
+# committed, and deliberately never the same file as OAuth tokens above.
+.jarvis-preferences.json

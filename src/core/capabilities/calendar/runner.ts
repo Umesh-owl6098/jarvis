@@ -190,6 +190,15 @@ async function runInner(intent: CalendarIntent, client: CalendarClient, signal?:
         ? `\n\n⚠ CONFLICT: you're busy ${formatLocal(proposal.conflict.start, intent.timezone)}–${formatLocal(proposal.conflict.end, intent.timezone)} (${proposal.conflict.title}).`
         : '';
 
+      // Checkpoint 23 §8 — preference application is never confirmation;
+      // it only fills in a duration the command itself never named. Called
+      // out explicitly (not just implied by START/END) so the user can see
+      // exactly why this proposal is 30 minutes before saying "Create it."
+      const durationNote =
+        intent.durationSource === 'preference' && intent.durationMinutes
+          ? `\nDURATION: ${intent.durationMinutes} minutes (using your stored default — say a different length to override)`
+          : '';
+
       return {
         status: 'completed',
         resultText:
@@ -198,8 +207,9 @@ async function runInner(intent: CalendarIntent, client: CalendarClient, signal?:
           `DATE: ${formatLocal(start, intent.timezone).split(',').slice(0, 2).join(',')}\n` +
           `START: ${formatLocal(start, intent.timezone)}\n` +
           `END: ${formatLocal(end, intent.timezone)}\n` +
-          `TIMEZONE: ${intent.timezone}\n` +
-          `ATTENDEES: ${proposal.attendees.length ? proposal.attendees.join(', ') : '(none)'}\n` +
+          `TIMEZONE: ${intent.timezone}` +
+          durationNote +
+          `\nATTENDEES: ${proposal.attendees.length ? proposal.attendees.join(', ') : '(none)'}\n` +
           `LOCATION: ${proposal.location ?? '(none)'}` +
           conflictLine,
         proposalCreated: { kind: 'create', proposal },

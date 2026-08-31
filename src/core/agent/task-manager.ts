@@ -46,6 +46,9 @@ import { isCancelAllPhrase, activePendingCapabilities, clearPending, describeAmb
 import { conversationContext } from './conversation-context';
 import { isStartOverPhrase, resolveConversationContext } from './context-resolver';
 import { attemptProposalRevision } from './proposal-revision';
+import { parsePreferenceCommand } from '@/core/preferences/intent';
+import { attemptPreferenceCommand } from '@/core/preferences/runner';
+import { preferencesStore } from '@/core/preferences/store';
 
 export interface RunTaskOptions {
   goal: string;
@@ -428,7 +431,13 @@ async function attemptCalendar(goal: string, taskId: string, onEvent: EventListe
     };
   }
 
-  const intent = detectCalendarIntent(goal)!; // caller already confirmed this is non-null
+  // Checkpoint 23 §7-8 — a stored duration preference only ever fills in
+  // for a duration THIS command never stated; detectCalendarIntent/
+  // resolveCreateTiming already give explicit text absolute priority (see
+  // calendar/intent.ts's resolveCreateTiming). Preferences are never keyed
+  // by sessionId — read fresh from the one local preference file.
+  const preferredDuration = preferencesStore.get('meetingDurationMinutes');
+  const intent = detectCalendarIntent(goal, preferredDuration)!; // caller already confirmed this is non-null
   try {
     const client = getCalendarClient();
     const outcome = await runCalendarIntent(intent, client, signal);
@@ -669,6 +678,24 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
       steps: 0, tokensUsed: 0, actions: [], events: [],
       capability: { selected: 'orchestration', reason: 'Explicit reset of conversational context.', readAttempted: false, browserFallbackUsed: false },
     };
+  }
+
+  // Checkpoint 23 — explicit User Preferences commands ("Remember that I
+  // prefer 30 minute meetings.", "What do you remember about my
+  // preferences?", "Forget my email style preference."). Deliberately
+  // checked here, on the RAW top-level user command only — never on
+  // retrieved Gmail/Calendar/Tasks/browser content (see preferences/
+  // intent.ts's module comment for why that's what keeps prompt injection
+  // out). Persistent and NOT keyed by sessionId (see preferences/store.ts's
+  // module comment on the session-vs-preferences distinction) — a reload's
+  // brand-new CP22 session still sees the same preferences, by design.
+  // parsePreferenceCommand()'s vocabulary is narrow enough that an ordinary
+  // capability command ("Schedule a 45 minute meeting tomorrow.") never
+  // matches and returns null, falling straight through unaffected.
+  const preferenceCommand = parsePreferenceCommand(rawGoal);
+  if (preferenceCommand) {
+    const taskId = providedTaskId || nanoid();
+    return attemptPreferenceCommand(rawGoal, taskId, onEvent, preferenceCommand);
   }
 
   // Checkpoint 22 — conversational revision of an EXISTING pending

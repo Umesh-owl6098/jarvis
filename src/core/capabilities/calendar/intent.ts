@@ -38,6 +38,8 @@ export interface CalendarIntent {
   attendeeNameHint?: string;
   location?: string;
   durationMinutes?: number;
+  /** Checkpoint 23 — was `durationMinutes` explicit text in THIS command, or a fallback (a stored preference, or the system default of 30)? Surfaced so the proposal display can honestly tell the user which one applied — see runner.ts's propose_create case. */
+  durationSource?: 'explicit' | 'preference' | 'default';
   proposedStart?: string;
   proposedEnd?: string;
   /** Set when only a vague part-of-day was given for a create — §12: may suggest a slot, never silently pick one. */
@@ -194,15 +196,25 @@ export function isCalendarSpecificCancelPhrase(text: string): boolean {
   return /^(cancel|don'?t (?:create|schedule|book|update)) the (meeting|event|appointment|calendar)$/.test(t);
 }
 
-function resolveCreateTiming(text: string): Pick<CalendarIntent, 'proposedStart' | 'proposedEnd' | 'dayPartOnly' | 'needsClarification' | 'durationMinutes'> {
+function resolveCreateTiming(
+  text: string,
+  defaultDurationMinutes?: number
+): Pick<CalendarIntent, 'proposedStart' | 'proposedEnd' | 'dayPartOnly' | 'needsClarification' | 'durationMinutes' | 'durationSource'> {
   const day = resolveDayPhrase(text);
   const clock = resolveClockTime(text);
-  const duration = resolveDurationMinutes(text) ?? 30;
+  // Checkpoint 23 — explicit text in THIS command always wins; a stored
+  // preference only ever fills in for a duration the CURRENT command never
+  // named at all (§7's precedence rule). resolveDurationMinutes(text)
+  // returns non-null ONLY when the text itself states a duration, so
+  // checking it first is what makes "explicit always wins" true here.
+  const explicit = resolveDurationMinutes(text);
+  const duration = explicit ?? defaultDurationMinutes ?? 30;
+  const durationSource: 'explicit' | 'preference' | 'default' = explicit !== null ? 'explicit' : defaultDurationMinutes !== undefined ? 'preference' : 'default';
 
   if (day && clock) {
     const start = isoAt(day.daysFromNow, clock.hour, clock.minute);
     const end = new Date(new Date(start).getTime() + duration * 60000).toISOString();
-    return { proposedStart: start, proposedEnd: end, durationMinutes: duration };
+    return { proposedStart: start, proposedEnd: end, durationMinutes: duration, durationSource };
   }
 
   const dayPart = resolveDayPart(text);
@@ -211,16 +223,16 @@ function resolveCreateTiming(text: string): Pick<CalendarIntent, 'proposedStart'
     // inspect free/busy within this window and suggest a slot, but this
     // function itself never picks one — that's not "resolving a time,"
     // that's guessing one.
-    return { dayPartOnly: dayPart, durationMinutes: duration };
+    return { dayPartOnly: dayPart, durationMinutes: duration, durationSource };
   }
 
   if (!day) {
-    return { needsClarification: 'No date was found in the request (e.g. "tomorrow", "Friday", "next Monday").', durationMinutes: duration };
+    return { needsClarification: 'No date was found in the request (e.g. "tomorrow", "Friday", "next Monday").', durationMinutes: duration, durationSource };
   }
-  return { needsClarification: 'No specific time was found in the request — only a date. Please specify a time (e.g. "at 3 PM") or a part of day (e.g. "afternoon").', durationMinutes: duration };
+  return { needsClarification: 'No specific time was found in the request — only a date. Please specify a time (e.g. "at 3 PM") or a part of day (e.g. "afternoon").', durationMinutes: duration, durationSource };
 }
 
-export function detectCalendarIntent(task: string): CalendarIntent | null {
+export function detectCalendarIntent(task: string, defaultDurationMinutes?: number): CalendarIntent | null {
   const t = task.trim();
   const timezone = DEFAULT_TIMEZONE;
   if (CALENDAR_WEBSITE_NAV_RE.test(t)) return null;
@@ -254,7 +266,7 @@ export function detectCalendarIntent(task: string): CalendarIntent | null {
   }
 
   if (CREATE_VERB_RE.test(t)) {
-    const timing = resolveCreateTiming(t);
+    const timing = resolveCreateTiming(t, defaultDurationMinutes);
     const attendees = attendeesFrom(t);
     return {
       operation: 'propose_create',

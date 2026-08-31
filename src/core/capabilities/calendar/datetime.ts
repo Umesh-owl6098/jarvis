@@ -50,7 +50,7 @@ export interface ResolvedDay {
   label: string;
 }
 
-const TIME_RE = /\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i;
+const TIME_RE = /\b(at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/gi;
 // "for" is optional — real usage caught live: "Schedule a 10 minute meeting
 // with GV tomorrow" names the duration adjectivally, before the noun
 // ("10 minute meeting"), not in the trailing "for 10 minutes" form this
@@ -78,21 +78,39 @@ export function resolveDayPart(text: string): DayPart | null {
   return (m?.[1]?.toLowerCase() as DayPart) ?? null;
 }
 
-/** Resolves an explicit clock time ("at 3pm", "3:30 PM", "15:00") to {hour, minute} in 24h form. Returns null if no explicit time is present. */
+/**
+ * Resolves an explicit clock time ("at 3pm", "3:30 PM", "15:00") to
+ * {hour, minute} in 24h form. Returns null if no explicit time is present.
+ *
+ * Checkpoint 23 fix — TIME_RE is unanchored and, run once, would match the
+ * FIRST number-like token in the text — including an unrelated LEADING
+ * duration adjective ("a 60 minute meeting... at 2 PM"), which is never a
+ * clock time. The fix is structural, not a special case for any specific
+ * number: scan EVERY candidate match (global flag) and return the first
+ * one carrying an EXPLICIT time signal — an am/pm marker, or the "at"
+ * keyword immediately before THAT candidate (not just present anywhere in
+ * the text, a looseness the previous version had, since it checked the
+ * whole string rather than the specific match). A signal-less bare number
+ * (no am/pm, no immediately-preceding "at" — e.g. "60" from "60 minute")
+ * is never accepted, exactly as before: this function still only ever
+ * resolves an EXPLICIT time, it just no longer lets an earlier, unrelated,
+ * implausible number pre-empt a later explicit one in the same sentence.
+ */
 export function resolveClockTime(text: string): { hour: number; minute: number } | null {
-  const m = TIME_RE.exec(text);
-  if (!m) return null;
-  let hour = parseInt(m[1], 10);
-  const minute = m[2] ? parseInt(m[2], 10) : 0;
-  const meridiem = m[3]?.toLowerCase();
-  if (hour > 23 || minute > 59) return null;
-  if (meridiem === 'pm' && hour < 12) hour += 12;
-  if (meridiem === 'am' && hour === 12) hour = 0;
-  // A bare number with no am/pm and no explicit "at" is too ambiguous to
-  // trust as a time (could be a duration, a room number, etc.) — require
-  // EITHER an am/pm marker OR the "at" keyword immediately before it.
-  if (!meridiem && !/\bat\s+\d/i.test(text)) return null;
-  return { hour, minute };
+  TIME_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = TIME_RE.exec(text))) {
+    const hasAtPrefix = !!m[1];
+    let hour = parseInt(m[2], 10);
+    const minute = m[3] ? parseInt(m[3], 10) : 0;
+    const meridiem = m[4]?.toLowerCase();
+    if (hour > 23 || minute > 59) continue; // not a plausible clock time at all — e.g. "60" from "60 minute"
+    if (!meridiem && !hasAtPrefix) continue; // no explicit signal on THIS candidate — never guessed
+    if (meridiem === 'pm' && hour < 12) hour += 12;
+    if (meridiem === 'am' && hour === 12) hour = 0;
+    return { hour, minute };
+  }
+  return null;
 }
 
 export function resolveDurationMinutes(text: string): number | null {
