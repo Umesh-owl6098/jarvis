@@ -52,7 +52,12 @@ const SEARCH_TASK_RE = /\bfind\s+(?:my\s+|the\s+)?(.+?)\s+task\b|\bfind\s+task\s
 // sentence shapes one at a time.
 export const TASKS_CONCEPT_RE = /\btasks?\b|\bto-?dos?\b|\breminders?\b/i;
 const CREATE_REMIND_RE = /\bremind me to\b\s+(.+)$/i;
-const CREATE_ADD_RE = /\badd\s+(?:a\s+)?(?:task|reminder)\s+(?:to|that)\s+(.+)$/i;
+// Post-CP23 fix — "create" added alongside "add": caught live, "create a
+// task to call GV tomorrow" matched neither this (verb-restricted to "add")
+// nor CREATE_REMIND_RE ("remind me to"), so it fell through Tasks entirely
+// and was wrongly claimed by Calendar's own much broader CREATE_VERB_RE
+// (see shared/tasks-guard.ts's new guard on the Calendar side of this fix).
+const CREATE_ADD_RE = /\b(?:add|create|make)\s+(?:a\s+)?(?:task|reminder)\s+(?:to|that)\s+(.+)$/i;
 // \btasks?\b (not just \btask\b) — caught live: "Mark JARVIS Tasks
 // Integration Test complete" fell through to the generic browser path
 // entirely, because the task's own title contains "Tasks" (plural) and the

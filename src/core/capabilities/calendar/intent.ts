@@ -18,6 +18,7 @@ import {
 } from './datetime';
 import type { CalendarPendingActionType } from './pending-action';
 import { GMAIL_EMAIL_VERB_RE } from '@/core/capabilities/shared/gmail-guard';
+import { TASKS_CREATE_VERB_RE } from '@/core/capabilities/shared/tasks-guard';
 import { isPersonalQueryShape } from '@/core/capabilities/shared/query-shape';
 
 export type CalendarOperation = 'list' | 'search' | 'freebusy' | 'propose_create' | 'propose_update' | 'propose_cancel';
@@ -237,6 +238,7 @@ export function detectCalendarIntent(task: string, defaultDurationMinutes?: numb
   const timezone = DEFAULT_TIMEZONE;
   if (CALENDAR_WEBSITE_NAV_RE.test(t)) return null;
   if (GMAIL_EMAIL_VERB_RE.test(t)) return null;
+  if (TASKS_CREATE_VERB_RE.test(t)) return null;
 
   if (CANCEL_VERB_RE.test(t)) {
     const targetHint = stripSearchNoise(t);

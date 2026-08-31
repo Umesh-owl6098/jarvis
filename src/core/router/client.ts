@@ -75,24 +75,49 @@ export class OmniRouteClient {
 
   /**
    * Implement exponential backoff with jitter.
+   *
+   * Post-CP23 fix — abortable: previously a plain setTimeout with no way
+   * for a caller's AbortSignal to interrupt it, so an abort arriving during
+   * the backoff delay (between retry attempts) had no effect until the
+   * delay finished on its own.
    */
-  private async waitBeforeRetry(attempt: number): Promise<void> {
+  private async waitBeforeRetry(attempt: number, signal?: AbortSignal): Promise<void> {
     // Exponential backoff: 1s, 2s, 4s + random jitter (0-1s)
     const baseDelay = this.retryDelayMs * Math.pow(2, attempt - 1);
     const jitter = Math.random() * 1000;
     const totalDelay = baseDelay + jitter;
-    await new Promise(resolve => setTimeout(resolve, totalDelay));
+    await new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) { reject(new DOMException('Cancelled', 'AbortError')); return; }
+      const timer = setTimeout(resolve, totalDelay);
+      signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new DOMException('Cancelled', 'AbortError'));
+      }, { once: true });
+    });
   }
 
   /**
    * Generate text using OmniRoute (OpenAI-compatible API).
    * Includes retry logic for transient failures.
+   *
+   * Post-CP23 fix — `signal` is now threaded all the way into the actual
+   * HTTP request (axios' native `signal` support) instead of being dropped
+   * before reaching this layer. Previously an in-flight request here could
+   * not be interrupted by the caller's AbortSignal at all — pressing Abort
+   * only took effect at the NEXT `signal.throwIfAborted()` checkpoint in
+   * executor.ts, which meant waiting for this call (and its own retries,
+   * each up to the 60s axios timeout) to finish on its own first. A
+   * cancellation is also never retried — `axios.isCancel()`/an aborted
+   * signal short-circuits straight to a rethrow, never re-entering the
+   * transient-error retry path below (which would otherwise treat the
+   * resulting `status === undefined` as "maybe worth retrying").
    */
-  async generate(request: GenerateRequest): Promise<GenerateResponse> {
+  async generate(request: GenerateRequest, signal?: AbortSignal): Promise<GenerateResponse> {
     const url = `${this.baseUrl}/api/v1/chat/completions`;
     let lastError: any = null;
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
       try {
         const response = await this.client.post(url, {
           model: request.model || 'auto', // Let OmniRoute choose
@@ -100,7 +125,7 @@ export class OmniRouteClient {
           temperature: request.temperature ?? 0.7,
           max_tokens: request.maxTokens ?? 2048,
           stream: request.stream ?? false,
-        });
+        }, { signal });
 
         const data = response.data.choices[0].message;
         const usage = response.data.usage;
@@ -128,6 +153,15 @@ export class OmniRouteClient {
 
         return result;
       } catch (error: any) {
+        // A deliberate cancellation (ours or the caller's) is never a
+        // "transient" failure worth retrying — axios reports it with no
+        // `error.response`, which would otherwise look exactly like a
+        // network blip (`status === undefined`, retried below). Checked
+        // FIRST, before that generic branch ever sees it.
+        if (signal?.aborted || axios.isCancel(error)) {
+          throw new DOMException('Cancelled', 'AbortError');
+        }
+
         lastError = error;
         const status = error.response?.status;
 
@@ -146,7 +180,7 @@ export class OmniRouteClient {
         if (attempt < this.maxRetries && (status === undefined || this.isTransientError(status))) {
           const waitMs = Math.round(this.retryDelayMs * Math.pow(2, attempt - 1));
           console.warn(`[OmniRoute] Attempt ${attempt}/${this.maxRetries} failed (${status}). Retrying in ${waitMs}ms...`);
-          await this.waitBeforeRetry(attempt);
+          await this.waitBeforeRetry(attempt, signal);
           continue;
         }
 
@@ -205,12 +239,18 @@ export class OmniRouteClient {
    * the planner is not silently handed a model that leaks reasoning into
    * `content`. Bounded by PLANNER_MAX_FALLBACKS so a degraded provider pool
    * cannot stall a task for minutes.
+   *
+   * Post-CP23 fix — `signal` now flows through to every `generate()` call
+   * in the chain, and an abort stops the fallback walk immediately rather
+   * than trying the next model — a deliberate cancellation is not "this
+   * model failed, try another."
    */
-  async generateForPlanning(request: GenerateRequest): Promise<GenerateResponse> {
+  async generateForPlanning(request: GenerateRequest, signal?: AbortSignal): Promise<GenerateResponse> {
     const chain = PLANNER_MODEL_CHAIN.slice(0, Math.max(1, PLANNER_MAX_FALLBACKS));
     const attempts: { model: string; error: string }[] = [];
 
     for (let i = 0; i < chain.length; i++) {
+      if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
       const model = chain[i];
       try {
         const response = await this.generate({
@@ -218,7 +258,7 @@ export class OmniRouteClient {
           model,
           temperature: request.temperature ?? PLANNER_TEMPERATURE,
           maxTokens: request.maxTokens ?? PLANNER_MAX_TOKENS,
-        });
+        }, signal);
         this.lastPlannerRouting = {
           requested: model,
           served: response.model ?? null,
@@ -229,7 +269,8 @@ export class OmniRouteClient {
           console.log(`[Planner routing] fell back to "${model}" (served: ${response.model})`);
         }
         return response;
-      } catch (error) {
+      } catch (error: any) {
+        if (signal?.aborted || error?.name === 'AbortError') throw error; // never fall back after a deliberate cancel
         const message = String((error as Error).message || error).split('\n')[0].slice(0, 160);
         attempts.push({ model, error: message });
         console.log(`[Planner routing] "${model}" failed: ${message}`);

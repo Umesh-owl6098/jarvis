@@ -18,7 +18,7 @@ export interface BrowserUiState {
 }
 
 export interface CapabilityUiState {
-  selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'preferences';
+  selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'preferences' | 'unsupported';
   reason: string;
   browserFallbackUsed: boolean;
 }

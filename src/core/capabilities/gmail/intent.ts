@@ -45,6 +45,15 @@ export interface GmailIntent {
    * to "missing recipient." Never set alongside a real email match.
    */
   recipientNameHint?: string;
+  /**
+   * Post-CP23 fix — set only for the bare imperative "email <person>" shape
+   * (no draft/write/compose verb, no body content at all — see
+   * BARE_EMAIL_RE below). Recipient resolution (including Contacts, if
+   * available) still happens normally, but gmail/runner.ts's draft case
+   * must ask what the email should say INSTEAD OF creating a draft — a
+   * bare "email GV" must never silently produce a real empty-body draft.
+   */
+  needsBodyClarification?: boolean;
 }
 
 const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w-]+/g;
@@ -59,6 +68,19 @@ const GMAIL_WEBSITE_NAV_RE = /\b(?:open|go to|navigate to|visit)\s+(?:gmail\.com
 
 const DRAFT_RE =
   /\b(?:draft|write|compose)\b.{0,20}\b(?:an?\s+)?(?:email|message)\b.{0,20}\bto\s+([^\n]+?)(?:\s+(?:saying|that says|with the message|about|stating)\s+(.+))?$/is;
+
+// Post-CP23 fix — the bare imperative "email <person>" ("email GV", "Email
+// John") with NO draft/write/compose verb and no body content at all.
+// Anchored to the START of the command (optionally after "please") so it
+// can never match a generic question/statement that merely mentions
+// "email" ("What is email marketing?", "Explain email authentication") —
+// those never open with the bare verb "email". A short denylist on the
+// captured target excludes the one realistic false positive this
+// leading-verb anchor alone wouldn't catch: "Email marketing is
+// important." also opens with "Email", but as a NOUN, not an imperative
+// aimed at a person.
+const BARE_EMAIL_RE = /^(?:please\s+)?email\s+(.+?)[.!?]?$/i;
+const EMAIL_NON_PERSON_TARGET_RE = /^(marketing|address(?:es)?|provider|client|server|service|app|application|settings|account|security|authentication|signature|list|template)\b/i;
 
 const CC_RE = /\bcc\s+([^\n,]+?)(?:\s+and\s+|,|\s+saying|\s+that says|\s+with the message|$)/i;
 const SUBJECT_RE = /\bsubject\s*(?:is|:)?\s*["']?([^"'\n]+?)["']?(?:\s*[,.]|\s+saying|\s+that says|\s+body|$)/i;
@@ -224,6 +246,25 @@ export function detectGmailIntent(task: string): GmailIntent | null {
       missingRecipient: recipients.length === 0,
       recipientNameHint: nameHint || undefined,
     };
+  }
+
+  const bareEmailMatch = BARE_EMAIL_RE.exec(t);
+  if (bareEmailMatch) {
+    const target = bareEmailMatch[1].trim();
+    if (target && !EMAIL_NON_PERSON_TARGET_RE.test(target)) {
+      const recipients = parseRecipients(target);
+      return {
+        operation: 'draft',
+        raw: t,
+        recipients,
+        missingRecipient: recipients.length === 0,
+        recipientNameHint: recipients.length === 0 ? target.replace(/[.,!?]+$/g, '').trim() : undefined,
+        needsBodyClarification: true,
+      };
+    }
+    // A non-person target ("Email marketing is important.") falls through
+    // to the existing fallbacks below rather than being treated as a
+    // person-directed draft request.
   }
 
   const summarizeMatch = SUMMARIZE_RE.exec(t);

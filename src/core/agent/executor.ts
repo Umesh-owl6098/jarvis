@@ -43,7 +43,7 @@ export interface ExecutionResult {
    * in scripts/tests that bypass task-manager.ts).
    */
   capability?: {
-    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'preferences';
+    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'preferences' | 'unsupported';
     reason: string;
     fallbackCapability?: 'browser';
     readAttempted: boolean;
@@ -431,7 +431,7 @@ export class AgentExecutor {
 
         // 2. PLAN
         this.eventCollector.emit('agent.planning', { url: observation.url }, this.stepCount + 1);
-        const action = await this.plan(observation);
+        const action = await this.plan(observation, signal);
 
         // Check for cancellation after planning
         signal?.throwIfAborted();
@@ -671,7 +671,7 @@ export class AgentExecutor {
     return obs;
   }
 
-  private async plan(observation: PageObservation): Promise<PlannerAction> {
+  private async plan(observation: PageObservation, signal?: AbortSignal): Promise<PlannerAction> {
     console.log('🧠 PLAN: Asking LLM what to do');
     if (this.lastFailure) {
       console.log(
@@ -679,7 +679,12 @@ export class AgentExecutor {
       );
     }
     try {
-      const action = await this.planner.plan(observation, this.lastFailure, this.progress ?? undefined);
+      // Post-CP23 fix — `signal` now reaches the actual planner HTTP call
+      // (see planner.ts / router/client.ts), so an abort mid-request
+      // actually interrupts it instead of only taking effect at the next
+      // `signal.throwIfAborted()` checkpoint after this call finally
+      // resolves on its own.
+      const action = await this.planner.plan(observation, this.lastFailure, this.progress ?? undefined, signal);
       console.log(`   Action: ${action.action}`);
       return action;
     } catch (error: any) {

@@ -104,16 +104,18 @@ export class Planner {
   async plan(
     observation: PageObservation,
     failure?: PlannerFailureContext | null,
-    progress?: TaskProgress
+    progress?: TaskProgress,
+    signal?: AbortSignal
   ): Promise<PlannerAction> {
     this.plannerAttempt = 0;
-    return this.planInternal(observation, failure, progress);
+    return this.planInternal(observation, failure, progress, signal);
   }
 
   private async planInternal(
     observation: PageObservation,
     failure?: PlannerFailureContext | null,
-    progress?: TaskProgress
+    progress?: TaskProgress,
+    signal?: AbortSignal
   ): Promise<PlannerAction> {
     this.plannerAttempt++;
 
@@ -248,7 +250,7 @@ Respond ONLY with valid JSON. No other text.`;
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-      });
+      }, signal);
 
       // Track token usage
       this.context.recordTokenUsage(response.inputTokens, response.outputTokens);
@@ -280,7 +282,7 @@ Respond ONLY with valid JSON. No other text.`;
       if (!matched) {
         if (this.plannerAttempt < 2) {
           console.log('[Planner] No schema-valid JSON action found, retrying once...');
-          return this.planInternal(observation, failure, progress);
+          return this.planInternal(observation, failure, progress, signal);
         }
         throw new Error(
           `No schema-valid JSON action in response: ${content.substring(0, 160)}`
@@ -291,6 +293,13 @@ Respond ONLY with valid JSON. No other text.`;
       console.log(`[Planner] Action: ${validated.action}${validated.action === 'use_skill' ? ` (${(validated as any).skillId})` : ''}`);
       return validated;
     } catch (error: any) {
+      // Post-CP23 fix — a cancellation must reach executor.ts's own
+      // `error.name === 'AbortError'` check UNCHANGED. Wrapping it into a
+      // generic Error (as every other failure below still is) would lose
+      // that name and make executor.ts report a real cancellation as a
+      // generic "failed" task instead of the clean "stopped" result it's
+      // supposed to produce.
+      if (signal?.aborted || error?.name === 'AbortError') throw error;
       throw new Error(`Planner failed: ${error.message}`);
     }
   }

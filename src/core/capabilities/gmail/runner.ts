@@ -175,6 +175,22 @@ async function runGmailIntentInner(intent: GmailIntent, client: GmailClient, sig
           tokens: 0,
         };
       }
+
+      // Post-CP23 fix — a bare "email GV" (no draft/write/compose verb, no
+      // body content at all) must ask what the email should say instead of
+      // silently creating a real empty-body draft. The recipient is still
+      // resolved above (including via Contacts) so the question can be
+      // asked with confidence about WHO, even though WHAT is still
+      // missing — but createDraft() is never reached for this shape.
+      if (intent.needsBodyClarification) {
+        return {
+          status: 'blocked',
+          resultText: 'What would you like the email to say?',
+          tokens: 0,
+          resolution,
+        };
+      }
+
       const subject = intent.subject || '(no subject)';
       const body = intent.body || '';
       const draft = await client.createDraft(recipients, subject, body, intent.cc, signal);

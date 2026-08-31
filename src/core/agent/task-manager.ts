@@ -49,6 +49,7 @@ import { attemptProposalRevision } from './proposal-revision';
 import { parsePreferenceCommand } from '@/core/preferences/intent';
 import { attemptPreferenceCommand } from '@/core/preferences/runner';
 import { preferencesStore } from '@/core/preferences/store';
+import { isUnsupportedPhoneCallIntent } from '@/core/capabilities/shared/unsupported-intent';
 
 export interface RunTaskOptions {
   goal: string;
@@ -767,17 +768,42 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
   // "cancel it" is now correctly recognized as a REJECTION instead. When
   // NOTHING is pending at all, the phrase still passes through unchanged
   // so the existing honest "nothing pending" report is preserved exactly.
+  // Post-CP23 fix — a second, narrower gap in the same family: when
+  // NOTHING is pending for THIS capability, the two guards below used to
+  // claim the phrase unconditionally (to preserve the honest "nothing
+  // pending" report for a genuinely stale/repeated confirm). But "cancel
+  // it"/"cancel that" is not calendar-exclusive vocabulary the way "book
+  // it"/"schedule it" is — it's the SAME shared reject wording
+  // isCalendarRejectPhrase/isTasksRejectPhrase/isSendCancelPhrase already
+  // recognize below. Caught live: a pending TASKS proposal + "Cancel it."
+  // was being unconditionally claimed by CALENDAR's own top-tier dispatch
+  // (nothing calendar-specific was pending, so the old guard fell back to
+  // "claim it anyway") and reported calendar's "nothing pending" message
+  // — while the real Tasks proposal sat there, still armed. Fixed by
+  // deferring (returning null) whenever the exact phrase is ALSO
+  // recognized shared reject vocabulary AND something else IS pending
+  // elsewhere — letting the ambiguous-reject tier below, which already
+  // resolves via activePendingCapabilities(), correctly identify and act
+  // on whatever capability actually has something pending. Only applies
+  // to that shared-reject-word case; "create it"/"book it"/"update it"/
+  // bare "delete it" — words the reject-phrase checkers don't recognize —
+  // are entirely unaffected and keep their exact prior behavior.
+  function isSharedRejectWord(text: string): boolean {
+    return isCalendarRejectPhrase(text) || isTasksRejectPhrase(text) || isSendCancelPhrase(text);
+  }
   function calendarPhraseMatchesPending(phraseType: CalendarPendingActionType | null): CalendarPendingActionType | null {
     if (!phraseType) return null;
     const active = calendarPendingActionStore.active(sessionId);
-    if (!active) return phraseType;
-    return active.type === phraseType ? phraseType : null;
+    if (active) return active.type === phraseType ? phraseType : null;
+    if (isSharedRejectWord(goal) && activePendingCapabilities(sessionId).length > 0) return null;
+    return phraseType;
   }
   function tasksPhraseMatchesPending(phraseType: TasksPendingActionType | null): TasksPendingActionType | null {
     if (!phraseType) return null;
     const active = tasksPendingActionStore.active(sessionId);
-    if (!active) return phraseType;
-    return active.type === phraseType ? phraseType : null;
+    if (active) return active.type === phraseType ? phraseType : null;
+    if (isSharedRejectWord(goal) && activePendingCapabilities(sessionId).length > 0) return null;
+    return phraseType;
   }
 
   const calendarPhraseType = calendarPhraseMatchesPending(unambiguousCalendarPhraseType(goal));
@@ -1007,6 +1033,27 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
   if (gmailIntent) {
     const taskId = providedTaskId || nanoid();
     return attemptGmail(goal, taskId, onEvent, signal, sessionId);
+  }
+
+  // Post-CP23 fix — an unsupported-capability request ("call GV", "phone
+  // Sarah") must fail fast and honestly, never reach the generic browser/
+  // OmniRoute planner (which has no website to find for a phone call and
+  // would spend real time trying). Checked AFTER Calendar/Tasks/Gmail so
+  // their own content-bearing phrasings ("create a task to call GV
+  // tomorrow") are already claimed by Tasks above and never reach this —
+  // this only ever sees a BARE imperative "call/phone/ring X" with nothing
+  // else recognized it first. Never touches Contacts — the response
+  // doesn't need to know who "GV" resolves to, only that calling itself
+  // isn't a capability JARVIS has (see unsupported-intent.ts).
+  if (isUnsupportedPhoneCallIntent(goal)) {
+    const taskId = providedTaskId || nanoid();
+    const resultText = "I can't place phone calls yet.";
+    onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'unsupported' as any } });
+    return {
+      taskId, goal, status: 'success', outcome: 'blocked', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [],
+      capability: { selected: 'unsupported', reason: 'Recognized as a phone-call request — JARVIS has no phone-call capability.', readAttempted: false, browserFallbackUsed: false },
+    };
   }
 
   // Checkpoint 14: only ever consider subgoal decomposition when the
