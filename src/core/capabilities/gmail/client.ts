@@ -75,15 +75,46 @@ function buildRawMessage(to: string[], subject: string, body: string, cc?: strin
   return base64UrlEncode(lines.join('\r\n'));
 }
 
+// Checkpoint 25 fix — MODULE-level (not instance-level): gmail/resolve.ts's
+// getGmailClient() deliberately constructs a FRESH RealGmailClient on every
+// call (always reads the latest token from disk, so a re-authorization
+// takes effect immediately without a server restart — unlike
+// MockGmailClient, which IS a true singleton via mockSingleton and can
+// safely own its own instance-level map). An instance-level `drafts` map
+// would therefore be thrown away and rebuilt empty on every single call,
+// contradicting this class's own documented "per process lifetime" cache
+// — caught live via Checkpoint 25's real-backend draft-revision
+// verification: updateDraft's caller (proposal-revision.ts) calls
+// getDraft() to read the current recipient/subject before revising, and
+// with a fresh empty map every time, it always came back null. Moving the
+// cache to module scope keeps it genuinely process-lifetime, exactly as
+// documented, without changing anything about how/when the OAuth2Client
+// itself gets constructed or refreshed.
+const realDraftsCache = new Map<string, MailDraft>();
+
+/**
+ * TEST-ONLY — direct read/write access to the module-level cache so its
+ * lifecycle properties (survives fresh instance construction, isolated
+ * from MockGmailClient, contains no OAuth data, etc.) can be verified
+ * deterministically without a real network call to the Gmail API. Not
+ * reachable from any user-facing command; only test files import these.
+ * Mirrors pending-slot.ts's __setForTesting / conversation-context.ts's
+ * __pushForTesting convention.
+ */
+export function __setRealDraftForTesting(draft: MailDraft): void {
+  realDraftsCache.set(draft.draftId, draft);
+}
+export function __getRealDraftCacheSizeForTesting(): number {
+  return realDraftsCache.size;
+}
+export function __clearRealDraftsCacheForTesting(): void {
+  realDraftsCache.clear();
+}
+
 export class RealGmailClient implements GmailClient {
   readonly backend = 'real' as const;
   private gmail: gmail_v1.Gmail;
-  // In-memory draft cache, per process lifetime — mirrors MockGmailClient's
-  // own model. getDraft() must be synchronous (part of the GmailClient
-  // contract, used by the idempotency check before any network round trip),
-  // so it can only see drafts created within this process's lifetime; a
-  // fresh createDraft() call always talks to the real API regardless.
-  private drafts = new Map<string, MailDraft>();
+  private drafts = realDraftsCache;
 
   constructor(auth: OAuth2Client) {
     this.gmail = google.gmail({ version: 'v1', auth });

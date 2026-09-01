@@ -79,7 +79,18 @@ const DRAFT_RE =
 // leading-verb anchor alone wouldn't catch: "Email marketing is
 // important." also opens with "Email", but as a NOUN, not an imperative
 // aimed at a person.
-const BARE_EMAIL_RE = /^(?:please\s+)?email\s+(.+?)[.!?]?$/i;
+//
+// Checkpoint 25 — "actually" added alongside "please" as an optional lead-
+// in filler word, for exactly one reason: with a gmail_draft_body slot
+// already active ("email GV" -> "What would you like the email to say?"),
+// "Actually email Priya" must replace the pending recipient (see CP24's
+// slot-replacement rule in pending-slot-resolver.ts), not be misread as
+// the answer to the ORIGINAL question. proposal-revision.ts's own
+// Checkpoint 25 trigger vocabulary deliberately never matches a bare
+// "actually email X" at all (see its ACTUALLY_SAY_RE comment) specifically
+// so this is the one and only place that phrase is recognized — as a
+// bare-email command, exactly like "please email X" already was.
+const BARE_EMAIL_RE = /^(?:please\s+|actually\s+)?email\s+(.+?)[.!?]?$/i;
 const EMAIL_NON_PERSON_TARGET_RE = /^(marketing|address(?:es)?|provider|client|server|service|app|application|settings|account|security|authentication|signature|list|template)\b/i;
 
 const CC_RE = /\bcc\s+([^\n,]+?)(?:\s+and\s+|,|\s+saying|\s+that says|\s+with the message|$)/i;

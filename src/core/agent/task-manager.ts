@@ -45,7 +45,7 @@ import { tryOrchestration } from './orchestrator';
 import { isCancelAllPhrase, activePendingCapabilities, clearPending, describeAmbiguousCancel } from '@/core/capabilities/shared/multi-pending';
 import { conversationContext } from './conversation-context';
 import { isStartOverPhrase, resolveConversationContext } from './context-resolver';
-import { attemptProposalRevision } from './proposal-revision';
+import { attemptProposalRevision, clearRevisionAmbiguity } from './proposal-revision';
 import { parsePreferenceCommand } from '@/core/preferences/intent';
 import { attemptPreferenceCommand } from '@/core/preferences/runner';
 import { preferencesStore } from '@/core/preferences/store';
@@ -696,6 +696,10 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
     // a later unrelated sentence can never be misread as answering a
     // question the user just explicitly abandoned.
     pendingSlotStore.clear(sessionId);
+    // Checkpoint 25 — also clears an outstanding "which capability did you
+    // mean?" revision-ambiguity question, same reasoning as the slot clear
+    // above.
+    clearRevisionAmbiguity(sessionId);
     const resultText = 'Cleared conversational context — starting fresh. (Any pending Gmail/Calendar/Tasks confirmation, if you have one, is untouched — cancel it explicitly if you want that gone too.)';
     onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'orchestration' as any } });
     return {
