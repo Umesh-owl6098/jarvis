@@ -18,6 +18,8 @@ export interface GmailOperationResult {
   tokens: number;
   /** Set only for a successful 'draft' operation — task-manager.ts turns this into a PendingAction. */
   draftCreated?: { draftId: string; recipients: string[]; subject: string; body: string };
+  /** Checkpoint 24 — set only when the draft's recipient(s) are already resolved AND the only thing missing is the body ("email GV"-shaped) — task-manager.ts turns this into a gmail_draft_body pending slot so the very next raw turn can supply the body. Never set for an ambiguous/unresolved recipient (see the recipient-resolution block above, which returns before this case is reached). */
+  awaitingBody?: { recipients: string[]; cc?: string[]; subject?: string };
   /** §19/§26 — set only when a recipient NAME (not an explicit email) was resolved through Contacts, for the Developer Inspector's optional RESOLUTION row. */
   resolution?: ResolutionSummary;
 }
@@ -188,6 +190,7 @@ async function runGmailIntentInner(intent: GmailIntent, client: GmailClient, sig
           resultText: 'What would you like the email to say?',
           tokens: 0,
           resolution,
+          awaitingBody: { recipients, cc: intent.cc, subject: intent.subject },
         };
       }
 

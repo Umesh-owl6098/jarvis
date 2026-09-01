@@ -208,6 +208,23 @@ export function isGmailSpecificCancelPhrase(text: string): boolean {
   return /^(cancel|don'?t send) the (email|draft|message)$/.test(t) || /^don'?t send( it| the email)?$/.test(t);
 }
 
+// Checkpoint 24 — the conversational wrapper a follow-up answer to "What
+// would you like the email to say?" is stripped of, deterministically.
+// Deliberately narrow: only these four fixed lead-ins are recognized, never
+// a creative LLM rewrite of the user's own words. "Tell him I'll be there
+// at 4." -> "I'll be there at 4." "I'll be there at 4." (no wrapper at all)
+// -> unchanged. This is NOT a general Gmail trigger — it is only ever
+// consulted by task-manager.ts's pending-slot completion logic, which
+// itself only runs when a gmail_draft_body slot is already active for this
+// session (see pending-slot.ts) — a bare "Tell him ..." sentence with no
+// active slot never reaches this function at all.
+const BODY_WRAPPER_RE = /^(?:tell\s+(?:him|her|them)|say)\s+(?:that\s+)?/i;
+
+/** Strips only an obvious conversational lead-in ("tell him"/"tell her"/"tell them"/"say") off a follow-up answer, preserving the rest of the user's own text verbatim. */
+export function extractFollowUpEmailBody(text: string): string {
+  return text.trim().replace(BODY_WRAPPER_RE, '').trim();
+}
+
 /**
  * Returns null when the task is not a Gmail-capability request at all —
  * callers fall through to the existing read/browser routing unchanged.

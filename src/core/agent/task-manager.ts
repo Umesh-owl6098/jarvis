@@ -50,6 +50,8 @@ import { parsePreferenceCommand } from '@/core/preferences/intent';
 import { attemptPreferenceCommand } from '@/core/preferences/runner';
 import { preferencesStore } from '@/core/preferences/store';
 import { isUnsupportedPhoneCallIntent } from '@/core/capabilities/shared/unsupported-intent';
+import { pendingSlotStore } from './pending-slot';
+import { attemptPendingSlotCompletion, recordGmailDraftBodySlot, recordCalendarDatetimeSlot } from './pending-slot-resolver';
 
 export interface RunTaskOptions {
   goal: string;
@@ -461,6 +463,14 @@ async function attemptCalendar(goal: string, taskId: string, onEvent: EventListe
       pendingAction = { type, title: created.proposal.title, start: created.proposal.start, confirmationRequired: true };
     }
 
+    // Checkpoint 24 — a 'propose_create' blocked specifically on missing
+    // date/time records a typed calendar_datetime slot so the user's very
+    // next raw turn ("Tomorrow at 2 PM") can complete the proposal without
+    // repeating "schedule a meeting with X" again — see
+    // pending-slot-resolver.ts's recordCalendarDatetimeSlot for the
+    // Contacts-resolution/safety details.
+    await recordCalendarDatetimeSlot(sessionId, intent, outcome, signal);
+
     const eventType = outcome.status === 'completed' ? 'agent.completed' : 'agent.failed';
     onEvent({ type: eventType, timestamp: Date.now(), taskId, data: { result: outcome.resultText, capability: 'calendar' } });
 
@@ -549,6 +559,13 @@ async function attemptGmail(goal: string, taskId: string, onEvent: EventListener
       pendingAction = { type: 'gmail_send', recipient: created.recipient, subject: created.subject, confirmationRequired: true };
     }
 
+    // Checkpoint 24 — the recipient is already resolved and the only thing
+    // missing is the body ("email GV" shape): record a typed
+    // gmail_draft_body slot so the user's very next raw turn can supply
+    // the missing body without repeating "draft"/"email"/"message" — see
+    // pending-slot-resolver.ts's recordGmailDraftBodySlot.
+    recordGmailDraftBodySlot(sessionId, outcome);
+
     const eventType = outcome.status === 'completed' ? 'agent.completed' : 'agent.failed';
     onEvent({ type: eventType, timestamp: Date.now(), taskId, data: { result: outcome.resultText, capability: 'gmail' } });
 
@@ -563,7 +580,7 @@ async function attemptGmail(goal: string, taskId: string, onEvent: EventListener
       actions: [`gmail:${intent.operation}`],
       events: [],
       capability: { selected: 'gmail', reason: `Task names a Gmail ${intent.operation} operation.`, readAttempted: false, browserFallbackUsed: false },
-      gmail: { operation: intent.operation, pendingAction },
+      gmail: { operation: intent.operation, pendingAction, awaitingBody: outcome.awaitingBody },
       resolution: outcome.resolution,
     };
   } catch (e: any) {
@@ -660,6 +677,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   pendingActionStore.pruneExpired();
   calendarPendingActionStore.pruneExpired();
   tasksPendingActionStore.pruneExpired();
+  pendingSlotStore.pruneAllExpired();
 
   // Checkpoint 22 §"Context expiry/reset" — "Forget that."/"Start over."
   // clears ONLY the new conversational-reference state (dateRef/
@@ -672,6 +690,12 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   if (isStartOverPhrase(rawGoal)) {
     const taskId = providedTaskId || nanoid();
     conversationContext.clear(sessionId);
+    // Checkpoint 24 — "Start over" also clears any outstanding
+    // missing-field question (a gmail_draft_body/calendar_datetime slot is
+    // conversational state, same family as conversationContext above), so
+    // a later unrelated sentence can never be misread as answering a
+    // question the user just explicitly abandoned.
+    pendingSlotStore.clear(sessionId);
     const resultText = 'Cleared conversational context — starting fresh. (Any pending Gmail/Calendar/Tasks confirmation, if you have one, is untouched — cancel it explicitly if you want that gone too.)';
     onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'orchestration' as any } });
     return {
@@ -791,18 +815,34 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
   function isSharedRejectWord(text: string): boolean {
     return isCalendarRejectPhrase(text) || isTasksRejectPhrase(text) || isSendCancelPhrase(text);
   }
+  // Checkpoint 24 fix — the same deferral now also applies when a pending
+  // CONVERSATIONAL SLOT (not a real PendingAction) is the only thing
+  // active: caught live, "email Alice" (creating a gmail_draft_body slot,
+  // never a calendarPendingActionStore/pendingActionStore/
+  // tasksPendingActionStore entry) followed by "Cancel it." was being
+  // unconditionally claimed by CALENDAR's top-tier dispatch (nothing
+  // calendar-specific pending, so the pre-CP24 guard fell back to "claim it
+  // anyway") and reported calendar's "nothing pending" message — while the
+  // Gmail slot sat there, still active, never cleared, never reachable by
+  // attemptPendingSlotCompletion below. A genuinely stale/repeat "cancel
+  // it" with nothing pending ANYWHERE (no real PendingAction, no slot) is
+  // completely unaffected and keeps its exact prior "nothing pending"
+  // behavior.
+  function hasActiveSlot(): boolean {
+    return !!pendingSlotStore.active(sessionId);
+  }
   function calendarPhraseMatchesPending(phraseType: CalendarPendingActionType | null): CalendarPendingActionType | null {
     if (!phraseType) return null;
     const active = calendarPendingActionStore.active(sessionId);
     if (active) return active.type === phraseType ? phraseType : null;
-    if (isSharedRejectWord(goal) && activePendingCapabilities(sessionId).length > 0) return null;
+    if (isSharedRejectWord(goal) && (activePendingCapabilities(sessionId).length > 0 || hasActiveSlot())) return null;
     return phraseType;
   }
   function tasksPhraseMatchesPending(phraseType: TasksPendingActionType | null): TasksPendingActionType | null {
     if (!phraseType) return null;
     const active = tasksPendingActionStore.active(sessionId);
     if (active) return active.type === phraseType ? phraseType : null;
-    if (isSharedRejectWord(goal) && activePendingCapabilities(sessionId).length > 0) return null;
+    if (isSharedRejectWord(goal) && (activePendingCapabilities(sessionId).length > 0 || hasActiveSlot())) return null;
     return phraseType;
   }
 
@@ -876,10 +916,28 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
   // never clear just one half of a dual-pending state.
   if (isCancelAllPhrase(goal)) {
     const active = activePendingCapabilities(sessionId);
-    if (active.length > 0) {
+    // Checkpoint 24 fix — "Cancel all" must clear an outstanding
+    // conversational slot too, not just real PendingActions: the user
+    // explicitly said ALL, and a slot is exactly the kind of open,
+    // uncommitted state "all" is meant to sweep up. Caught via this
+    // investigation's own cancellation matrix — with a real PendingAction
+    // ALSO active, the pre-fix code took the early-return branch below and
+    // never reached attemptPendingSlotCompletion's own (slot-only) cancel
+    // handling, leaving the slot dangling. This is the only behavior
+    // change in this fix: a bare "Cancel it." is unaffected (still binds
+    // to the one thing that actually needs a yes/no — see the module
+    // comment on attemptPendingSlotCompletion for why that's intentional,
+    // not a gap).
+    const slotActive = !!pendingSlotStore.active(sessionId);
+    if (active.length > 0 || slotActive) {
       for (const cap of active) clearPending(sessionId, cap);
+      const parts: string[] = active.map((c) => (c === 'calendar' ? 'the calendar change' : c === 'gmail' ? 'the email draft' : 'the task change'));
+      if (slotActive) {
+        parts.push('the pending question');
+        pendingSlotStore.clear(sessionId);
+      }
       const taskId = providedTaskId || nanoid();
-      const resultText = `Cancelled ${active.map((c) => (c === 'calendar' ? 'the calendar change' : c === 'gmail' ? 'the email draft' : 'the task change')).join(' and ')} — nothing was changed.`;
+      const resultText = `Cancelled ${parts.join(' and ')} — nothing was changed.`;
       onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'orchestration' as any } });
       return {
         taskId, goal, status: 'success', outcome: 'completed', result: resultText,
@@ -887,7 +945,9 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
         capability: { selected: 'orchestration', reason: 'Explicit cancellation of all pending actions.', readAttempted: false, browserFallbackUsed: false },
       };
     }
-    // nothing was pending — fall through to normal routing, same as the ambiguous tier's zero-active case below.
+    // nothing was pending anywhere (no real PendingAction, no slot) —
+    // fall through to normal routing, same as the ambiguous tier's
+    // zero-active case below.
   }
   if (isCalendarSpecificCancelPhrase(goal) && calendarPendingActive) {
     calendarPendingActionStore.clear(sessionId);
@@ -1055,6 +1115,22 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
       capability: { selected: 'unsupported', reason: 'Recognized as a phone-call request — JARVIS has no phone-call capability.', readAttempted: false, browserFallbackUsed: false },
     };
   }
+
+  // Checkpoint 24 — an outstanding gmail_draft_body/calendar_datetime slot
+  // (JARVIS asked a missing-field question on the immediately prior turn)
+  // gets first refusal on completing THIS turn's raw text, but only after
+  // every explicit-command detector above (orchestration, Calendar, Tasks,
+  // Gmail, the unsupported-call guard) already found nothing — see
+  // attemptPendingSlotCompletion's own module comment for why this
+  // ordering is exactly what lets "What's on my calendar today?" still
+  // interrupt a pending Gmail slot instead of being swallowed as its body.
+  // Returns null (no active slot, or the raw text is itself a genuinely
+  // unrelated new sentence a capability detector already would have
+  // claimed above) far more often than not, in which case routing falls
+  // through to subgoal decomposition/browser exactly as before this
+  // checkpoint.
+  const slotCompletion = await attemptPendingSlotCompletion(goal, providedTaskId, onEvent, signal, sessionId);
+  if (slotCompletion) return slotCompletion;
 
   // Checkpoint 14: only ever consider subgoal decomposition when the
   // existing single-goal classifier has nothing to offer for the WHOLE

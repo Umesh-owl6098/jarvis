@@ -60,6 +60,8 @@ export interface ExecutionResult {
     operation: 'list' | 'search' | 'read' | 'summarize' | 'draft' | 'send';
     pendingAction?: { type: 'gmail_send'; recipient: string[]; subject: string; confirmationRequired: true };
     sentMessageId?: string;
+    /** Checkpoint 24 — set only when this turn asked "What would you like the email to say?" with an already-resolved recipient; task-manager.ts's runTask() wrapper turns this into a gmail_draft_body pending slot. Never itself a mutation or a PendingAction. */
+    awaitingBody?: { recipients: string[]; cc?: string[]; subject?: string };
   };
   /**
    * Checkpoint 18: set only when the Calendar capability handled this task
