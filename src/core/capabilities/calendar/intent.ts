@@ -197,6 +197,23 @@ export function isCalendarSpecificCancelPhrase(text: string): boolean {
   return /^(cancel|don'?t (?:create|schedule|book|update)) the (meeting|event|appointment|calendar)$/.test(t);
 }
 
+/**
+ * Checkpoint 26 — the CONFIRM analogue of isCalendarSpecificCancelPhrase
+ * above, for the same reason: a workflow (e.g. "Schedule a meeting
+ * tomorrow and create a task to prepare.") can leave a Calendar proposal
+ * AND a Tasks proposal pending simultaneously, and a bare "Confirm" must
+ * never guess which one — see task-manager.ts's ambiguous-confirm tier.
+ * "Confirm the meeting."/"Confirm the event." names the capability
+ * specifically, so it's safe to act on regardless of what else is
+ * pending, dispatching to whatever type (create/update/delete) is
+ * ACTUALLY stored — this phrase is deliberately type-agnostic, unlike
+ * "Create it."/"Update it."/"Cancel it." above.
+ */
+export function isCalendarSpecificConfirmPhrase(text: string): boolean {
+  const t = text.trim().toLowerCase().replace(/[.,!?]+$/, '');
+  return /^confirm the (meeting|event|appointment|calendar)$/.test(t);
+}
+
 function resolveCreateTiming(
   text: string,
   defaultDurationMinutes?: number

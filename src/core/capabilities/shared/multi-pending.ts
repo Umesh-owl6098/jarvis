@@ -48,3 +48,22 @@ export function describeAmbiguousCancel(active: PendingCapability[]): string {
   const list = active.map((c) => `a pending ${LABEL[c]} action`).join(' and ');
   return `I have ${list}. Which should I cancel? (Or say "cancel both"/"cancel all".)`;
 }
+
+/**
+ * Checkpoint 26 — the CONFIRM analogue of describeAmbiguousCancel above.
+ * A workflow (e.g. "Schedule a meeting tomorrow and create a task to
+ * prepare.") can leave a Calendar proposal AND a Tasks proposal pending
+ * simultaneously — a bare "Confirm"/"yes"/"go ahead" must never guess
+ * which one to execute; the pre-existing ambiguous-confirm tier
+ * (task-manager.ts) already correctly withholds action when 2+ are
+ * active, but previously fell through silently with no clarification at
+ * all — asymmetric with the cancel side, which has always explained
+ * itself. Named CONCEPT nouns ("the calendar event or the task") so the
+ * follow-up "Confirm the meeting."/"Confirm the task." (see each
+ * capability's own isXSpecificConfirmPhrase) reads naturally as the answer.
+ */
+export function describeAmbiguousConfirm(active: PendingCapability[]): string {
+  const names = active.map((c) => (c === 'calendar' ? 'the calendar event' : c === 'gmail' ? 'the email' : 'the task'));
+  const list = names.length === 2 ? names.join(' or ') : `${names.slice(0, -1).join(', ')}, or ${names[names.length - 1]}`;
+  return `I have multiple things ready for confirmation. Do you want to confirm ${list}?`;
+}

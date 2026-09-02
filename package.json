@@ -72,7 +72,12 @@
     "test:cp25-tasks-revision": "tsx src/scripts/test-cp25-tasks-revision.ts",
     "test:cp25-gmail-revision": "tsx src/scripts/test-cp25-gmail-revision.ts",
     "test:cp25-revision-routing-safety": "tsx src/scripts/test-cp25-revision-routing-safety.ts",
-    "test:cp25-gmail-cache-safety": "tsx src/scripts/test-cp25-gmail-cache-safety.ts"
+    "test:cp25-gmail-cache-safety": "tsx src/scripts/test-cp25-gmail-cache-safety.ts",
+    "test:cp26-workflow-parsing": "tsx src/scripts/test-cp26-workflow-parsing.ts",
+    "test:cp26-workflow-dependencies-safety": "tsx src/scripts/test-cp26-workflow-dependencies-safety.ts",
+    "test:cp26-workflow-injection": "tsx src/scripts/test-cp26-workflow-injection.ts",
+    "test:cp26-workflow-conversation-session": "tsx src/scripts/test-cp26-workflow-conversation-session.ts",
+    "test:cp26-workflow-cancellation": "tsx src/scripts/test-cp26-workflow-cancellation.ts"
   },
   "keywords": [],
   "author": "",

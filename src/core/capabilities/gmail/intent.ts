@@ -219,6 +219,21 @@ export function isGmailSpecificCancelPhrase(text: string): boolean {
   return /^(cancel|don'?t send) the (email|draft|message)$/.test(t) || /^don'?t send( it| the email)?$/.test(t);
 }
 
+/**
+ * Checkpoint 26 — the CONFIRM analogue of isGmailSpecificCancelPhrase
+ * above (symmetry with calendar/intent.ts's isCalendarSpecificConfirmPhrase
+ * and tasks/intent.ts's isTasksSpecificConfirmPhrase) — "Confirm the
+ * email."/"Confirm the draft." is Gmail-specific and safe to act on
+ * regardless of what else is pending. Deliberately does NOT use the bare
+ * word "send" here (that's isUnambiguousSendPhrase's own, already-
+ * established vocabulary) — this only recognizes the explicit "confirm
+ * the X" noun-phrase shape.
+ */
+export function isGmailSpecificConfirmPhrase(text: string): boolean {
+  const t = text.trim().toLowerCase().replace(/[.,!?]+$/, '');
+  return /^confirm the (email|draft|message)$/.test(t);
+}
+
 // Checkpoint 24 — the conversational wrapper a follow-up answer to "What
 // would you like the email to say?" is stripped of, deterministically.
 // Deliberately narrow: only these four fixed lead-ins are recognized, never

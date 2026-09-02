@@ -188,3 +188,9 @@ export function isTasksSpecificCancelPhrase(text: string): boolean {
   const t = text.trim().toLowerCase().replace(/[.,!?]+$/, '');
   return /^(cancel|don'?t (?:create|add)) the (task|reminder)$/.test(t);
 }
+
+/** Checkpoint 26 — the CONFIRM analogue of isTasksSpecificCancelPhrase above; see calendar/intent.ts's isCalendarSpecificConfirmPhrase for the full reasoning. */
+export function isTasksSpecificConfirmPhrase(text: string): boolean {
+  const t = text.trim().toLowerCase().replace(/[.,!?]+$/, '');
+  return /^confirm the (task|reminder)$/.test(t);
+}

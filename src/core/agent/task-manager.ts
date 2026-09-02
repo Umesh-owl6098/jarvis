@@ -15,7 +15,7 @@ import { classifyGoal } from './goal-state';
 import { decomposeTask, validatePlan, type TaskPlan } from './subgoal';
 import { runTaskPlan } from './subgoal-runner';
 import { nanoid } from 'nanoid';
-import { detectGmailIntent, isSendConfirmationPhrase, isUnambiguousSendPhrase, isSendCancelPhrase, isGmailSpecificCancelPhrase } from '@/core/capabilities/gmail/intent';
+import { detectGmailIntent, isSendConfirmationPhrase, isUnambiguousSendPhrase, isSendCancelPhrase, isGmailSpecificCancelPhrase, isGmailSpecificConfirmPhrase } from '@/core/capabilities/gmail/intent';
 import { runGmailIntent } from '@/core/capabilities/gmail/runner';
 import { getGmailClient, gmailAvailability } from '@/core/capabilities/gmail/resolve';
 import { pendingActionStore } from '@/core/capabilities/gmail/pending-action';
@@ -25,6 +25,7 @@ import {
   isAmbiguousCalendarConfirmPhrase,
   isCalendarRejectPhrase,
   isCalendarSpecificCancelPhrase,
+  isCalendarSpecificConfirmPhrase,
 } from '@/core/capabilities/calendar/intent';
 import { runCalendarIntent } from '@/core/capabilities/calendar/runner';
 import { getCalendarClient, calendarAvailability } from '@/core/capabilities/calendar/resolve';
@@ -36,13 +37,14 @@ import {
   isAmbiguousTasksConfirmPhrase,
   isTasksRejectPhrase,
   isTasksSpecificCancelPhrase,
+  isTasksSpecificConfirmPhrase,
 } from '@/core/capabilities/tasks/intent';
 import { runTasksIntent } from '@/core/capabilities/tasks/runner';
 import { getTasksClient, tasksAvailability } from '@/core/capabilities/tasks/resolve';
 import { tasksPendingActionStore, type TasksPendingActionType } from '@/core/capabilities/tasks/pending-action';
 import { formatDueDate } from '@/core/capabilities/tasks/datetime';
 import { tryOrchestration } from './orchestrator';
-import { isCancelAllPhrase, activePendingCapabilities, clearPending, describeAmbiguousCancel } from '@/core/capabilities/shared/multi-pending';
+import { isCancelAllPhrase, activePendingCapabilities, clearPending, describeAmbiguousCancel, describeAmbiguousConfirm } from '@/core/capabilities/shared/multi-pending';
 import { conversationContext } from './conversation-context';
 import { isStartOverPhrase, resolveConversationContext } from './context-resolver';
 import { attemptProposalRevision, clearRevisionAmbiguity } from './proposal-revision';
@@ -906,8 +908,24 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
         return attemptTasksConfirmation(goal, taskId, onEvent, signal, sessionId);
       }
     }
-    // more than one or none active — fall through; no capability claims an
-    // ambiguous bare word it can't uniquely resolve.
+    if (activeCount >= 2) {
+      // Checkpoint 26 fix — a workflow (e.g. "Schedule a meeting tomorrow
+      // and create a task to prepare.") can leave 2+ real proposals
+      // pending at once; a bare "Confirm" must ask which one instead of
+      // silently falling through with no clarification at all — mirrors
+      // the ambiguous-CANCEL tier's own describeAmbiguousCancel below,
+      // which already has this exact discipline. Never executes anything.
+      const taskId = providedTaskId || nanoid();
+      const resultText = describeAmbiguousConfirm(activePendingCapabilities(sessionId));
+      onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'orchestration' as any } });
+      return {
+        taskId, goal, status: 'success', outcome: 'blocked', result: resultText,
+        steps: 0, tokensUsed: 0, actions: [], events: [],
+        capability: { selected: 'orchestration', reason: 'Ambiguous confirmation — multiple pending actions active.', readAttempted: false, browserFallbackUsed: false },
+      };
+    }
+    // none active — fall through; no capability claims an ambiguous bare
+    // word with nothing pending anywhere.
   }
 
   // Checkpoint 21 fix — capability-UNAMBIGUOUS cancel phrases (the phrase's
@@ -953,6 +971,31 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
     // fall through to normal routing, same as the ambiguous tier's
     // zero-active case below.
   }
+
+  // Checkpoint 26 — capability-UNAMBIGUOUS CONFIRM phrases ("Confirm the
+  // meeting.", "Confirm the task."), same reasoning and same unconditional-
+  // check-first discipline as the specific CANCEL phrases immediately
+  // below: a workflow (e.g. "Schedule a meeting tomorrow and create a
+  // task to prepare.") can leave a Calendar proposal AND a Tasks proposal
+  // pending simultaneously, and the existing ambiguous bare-word confirm
+  // tier above requires exactly one store active to act on anything at
+  // all — it could never confirm just one half of a dual-pending
+  // workflow. Deliberately type-agnostic (dispatches to whatever
+  // create/update/delete type is ACTUALLY stored), unlike "Create it."/
+  // "Update it." above.
+  if (isCalendarSpecificConfirmPhrase(goal) && calendarPendingActive) {
+    const taskId = providedTaskId || nanoid();
+    return attemptCalendarConfirmation(goal, taskId, onEvent, signal, sessionId);
+  }
+  if (isTasksSpecificConfirmPhrase(goal) && tasksPendingActive) {
+    const taskId = providedTaskId || nanoid();
+    return attemptTasksConfirmation(goal, taskId, onEvent, signal, sessionId);
+  }
+  if (isGmailSpecificConfirmPhrase(goal) && gmailPendingActive) {
+    const taskId = providedTaskId || nanoid();
+    return attemptGmailSendConfirmation(goal, taskId, onEvent, signal, sessionId);
+  }
+
   if (isCalendarSpecificCancelPhrase(goal) && calendarPendingActive) {
     calendarPendingActionStore.clear(sessionId);
     const taskId = providedTaskId || nanoid();
