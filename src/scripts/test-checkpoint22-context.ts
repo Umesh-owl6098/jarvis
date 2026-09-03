@@ -29,6 +29,46 @@ function check(name: string, ok: boolean, detail = '') {
   else { fail++; console.log(`❌ ${name}${detail ? ` — ${detail}` : ''}`); }
 }
 
+// Test-determinism fix — a weekday name guaranteed to resolve (via
+// calendar/datetime.ts's own resolveDayPhrase/daysUntilWeekday) to a date
+// distinct from the pending proposal's EXISTING "tomorrow" due date,
+// regardless of which real weekday it is. Fixes a latent collision: a
+// hardcoded "Friday" happens to equal "tomorrow" whenever today is
+// Thursday, which made a revision assertion expecting the due date to
+// CHANGE fail on Thursdays specifically. Derived from the ACTUAL due value
+// the pending proposal already has (never from the test process's own
+// independent `new Date().getDay()` read) — production "tomorrow"/
+// weekday-name semantics are completely unchanged.
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * Timezone-safe weekday (0=Sunday..6=Saturday) for a Google Tasks
+ * date-only `due` value. Mirrors tasks/datetime.ts's own formatDueDate()
+ * parsing technique — slice the Y-M-D substring, construct a LOCAL Date
+ * from those exact numbers — rather than `new Date(due).getDay()`, which
+ * parses `due` as a UTC instant first and then converts to the process's
+ * local time before reading the weekday; in a negative UTC-offset
+ * timezone that conversion can silently shift the calendar day backward,
+ * returning the wrong weekday.
+ */
+function dateOnlyWeekday(due: string): number {
+  const [y, m, d] = due.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
+/**
+ * Derives a replacement weekday from the ACTUAL existing due date (offset
+ * +3 from its weekday). For a `due` that is always "tomorrow" (as every
+ * caller here sets up), this always resolves to exactly 4 days from
+ * today — provably distinct from "tomorrow" (1 day) for all 7 possible
+ * weekdays, never just Thursday (see the CP27 final report's exhaustive
+ * 7-case proof).
+ */
+function distinctRevisionWeekdayFromDue(dueIso: string): { name: string; weekday: number } {
+  const weekday = (dateOnlyWeekday(dueIso) + 3) % 7;
+  return { name: WEEKDAY_NAMES[weekday], weekday };
+}
+
 function clearAll() {
   pendingActionStore.clear(SID);
   calendarPendingActionStore.clear(SID);
@@ -92,7 +132,8 @@ async function main() {
     const client = getTasksClient();
     await runTask({ sessionId: SID, goal: 'Remind me to submit the report tomorrow.', onEvent: () => {}, taskId: nanoid() });
     const oldDue = tasksPendingActionStore.active(SID)?.proposal.due;
-    const r = await runTask({ sessionId: SID, goal: 'Make that Friday.', onEvent: () => {}, taskId: nanoid() });
+    const revisionWeekday = distinctRevisionWeekdayFromDue(oldDue!);
+    const r = await runTask({ sessionId: SID, goal: `Make that ${revisionWeekday.name}.`, onEvent: () => {}, taskId: nanoid() });
     const newDue = tasksPendingActionStore.active(SID)?.proposal.due;
     const allTasks = await client.listTasks(client.defaultListId, 100);
     const createdNow = allTasks.some((tk) => tk.title.toLowerCase().includes('submit') && tk.due === newDue);

@@ -24,6 +24,28 @@ import { readFileSync } from 'fs';
 
 const SID = 'test-session-a';
 
+// Test-determinism fix — see test-checkpoint22-context.ts's identical
+// helper for the full rationale: derives a replacement weekday from the
+// ACTUAL pending proposal's existing "tomorrow" due date (never from the
+// test process's own independent `new Date().getDay()` read), guaranteed
+// distinct from it for all 7 possible weekdays. Used only for test 33
+// below, the one assertion that actually failed (a hardcoded "Friday"
+// collided with "tomorrow" specifically on Thursdays) — production date
+// semantics are unchanged.
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** Timezone-safe weekday for a Tasks date-only `due` value — mirrors tasks/datetime.ts's own formatDueDate() parsing technique rather than `new Date(due).getDay()`, which can shift the calendar day backward in a negative-UTC-offset timezone. */
+function dateOnlyWeekday(due: string): number {
+  const [y, m, d] = due.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
+/** Offset +3 from the EXISTING due date's weekday — always resolves to exactly 4 days from today, provably distinct from "tomorrow" (1 day) for all 7 weekdays. */
+function distinctRevisionWeekdayFromDue(dueIso: string): { name: string; weekday: number } {
+  const weekday = (dateOnlyWeekday(dueIso) + 3) % 7;
+  return { name: WEEKDAY_NAMES[weekday], weekday };
+}
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -102,7 +124,8 @@ async function main() {
     await runTask({ sessionId: SID, goal: 'Remind me to pay rent tomorrow.', onEvent: () => {}, taskId: nanoid() });
     const calBefore = calendarPendingActionStore.active(SID)!.proposal.start;
     const taskBefore = tasksPendingActionStore.active(SID)!.proposal.due;
-    const r = await runTask({ sessionId: SID, goal: 'Actually make it Friday.', onEvent: () => {}, taskId: nanoid() });
+    const revisionWeekday = distinctRevisionWeekdayFromDue(taskBefore!);
+    const r = await runTask({ sessionId: SID, goal: `Actually make it ${revisionWeekday.name}.`, onEvent: () => {}, taskId: nanoid() });
     check('31. ambiguous revision with both Calendar and Tasks pending — asks which one, never guesses', r.outcome === 'blocked' && /calendar event or the task/i.test(r.result), `result=${r.result}`);
     const calAfter = calendarPendingActionStore.active(SID)!.proposal.start;
     const taskAfter = tasksPendingActionStore.active(SID)!.proposal.due;
@@ -113,8 +136,8 @@ async function main() {
     const calStillSame = calendarPendingActionStore.active(SID)!.proposal.start;
     const taskNow = tasksPendingActionStore.active(SID)!.proposal.due;
     check(
-      '33. "The task." resolves the ambiguity — ONLY the task is revised, Calendar proposal still untouched',
-      /UPDATED TASK READY FOR CONFIRMATION/.test(resolved.result) && calStillSame === calBefore && taskNow !== taskBefore && new Date(taskNow!).getUTCDay() === 5,
+      `33. "The task." resolves the ambiguity — ONLY the task is revised, Calendar proposal still untouched`,
+      /UPDATED TASK READY FOR CONFIRMATION/.test(resolved.result) && calStillSame === calBefore && taskNow !== taskBefore && dateOnlyWeekday(taskNow!) === revisionWeekday.weekday,
       `result=${resolved.result}`
     );
     clearAll(SID);

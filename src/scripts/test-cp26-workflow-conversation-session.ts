@@ -25,6 +25,27 @@ import { nanoid } from 'nanoid';
 const SID = 'test-session-a';
 const SID_B = 'test-session-b';
 
+// Test-determinism fix — see test-checkpoint22-context.ts's identical
+// helper for the full rationale: derives a replacement weekday from the
+// ACTUAL pending proposal's existing "tomorrow" due date (never from the
+// test process's own independent `new Date().getDay()` read), guaranteed
+// distinct from it for all 7 possible weekdays. Used only for test 34
+// below, the one assertion that actually failed (a hardcoded "Friday"
+// collided with "tomorrow" specifically on Thursdays) — production date
+// semantics are unchanged.
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** Timezone-safe weekday for a Tasks date-only `due` value — mirrors tasks/datetime.ts's own formatDueDate() parsing technique rather than `new Date(due).getDay()`, which can shift the calendar day backward in a negative-UTC-offset timezone. */
+function dateOnlyWeekday(due: string): number {
+  const [y, m, d] = due.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
+/** Offset +3 from the EXISTING due date's weekday — always resolves to exactly 4 days from today, provably distinct from "tomorrow" (1 day) for all 7 weekdays. */
+function distinctRevisionWeekdayFromDue(dueIso: string): string {
+  return WEEKDAY_NAMES[(dateOnlyWeekday(dueIso) + 3) % 7];
+}
+
 let pass = 0;
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -158,8 +179,9 @@ async function main() {
     // ---- 34. revise (Session A still has its own pending task; Session B's is now confirmed/gone, so seed a fresh one) ----
     await runTask({ sessionId: SID_B, goal: 'Remind me to water plants tomorrow.', onEvent: () => {}, taskId: nanoid() });
     const bTaskDueBefore2 = tasksPendingActionStore.active(SID_B)!.proposal.due;
-    const revised = await runTask({ sessionId: SID_B, goal: 'Actually make it Friday.', onEvent: () => {}, taskId: nanoid() });
-    check('34. "Actually make it Friday." in Session B revises ONLY Session B\'s own task', /UPDATED TASK READY FOR CONFIRMATION/.test(revised.result) && tasksPendingActionStore.active(SID_B)?.proposal.due !== bTaskDueBefore2, `result=${revised.result}`);
+    const revisionWeekday = distinctRevisionWeekdayFromDue(bTaskDueBefore2!);
+    const revised = await runTask({ sessionId: SID_B, goal: `Actually make it ${revisionWeekday}.`, onEvent: () => {}, taskId: nanoid() });
+    check(`34. "Actually make it ${revisionWeekday}." in Session B revises ONLY Session B's own task`, /UPDATED TASK READY FOR CONFIRMATION/.test(revised.result) && tasksPendingActionStore.active(SID_B)?.proposal.due !== bTaskDueBefore2, `result=${revised.result}`);
     check('34b. Session A\'s Task proposal is completely untouched by Session B\'s revision', tasksPendingActionStore.active(SID)?.proposal.due === aTaskDueBefore);
 
     // ---- 35. cancel ----

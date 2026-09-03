@@ -54,6 +54,8 @@ import { preferencesStore } from '@/core/preferences/store';
 import { isUnsupportedPhoneCallIntent } from '@/core/capabilities/shared/unsupported-intent';
 import { pendingSlotStore } from './pending-slot';
 import { attemptPendingSlotCompletion, recordGmailDraftBodySlot, recordCalendarDatetimeSlot } from './pending-slot-resolver';
+import { detectBriefingIntent } from './briefing/intent';
+import { runBriefing, attemptBriefingFollowUp, briefingReferenceStore } from './briefing/runner';
 
 export interface RunTaskOptions {
   goal: string;
@@ -680,6 +682,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   calendarPendingActionStore.pruneExpired();
   tasksPendingActionStore.pruneExpired();
   pendingSlotStore.pruneAllExpired();
+  briefingReferenceStore.pruneAllExpired();
 
   // Checkpoint 22 §"Context expiry/reset" — "Forget that."/"Start over."
   // clears ONLY the new conversational-reference state (dateRef/
@@ -702,6 +705,11 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
     // mean?" revision-ambiguity question, same reasoning as the slot clear
     // above.
     clearRevisionAmbiguity(sessionId);
+    // Checkpoint 27 — also clears the bounded briefing-item-reference list
+    // ("Tell me more about the second item."), same ephemeral-conversational-
+    // state reasoning as the two clears above; never touches real
+    // Calendar/Tasks/Gmail data, only the small safe reference list.
+    briefingReferenceStore.clear(sessionId);
     const resultText = 'Cleared conversational context — starting fresh. (Any pending Gmail/Calendar/Tasks confirmation, if you have one, is untouched — cancel it explicitly if you want that gone too.)';
     onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'orchestration' as any } });
     return {
@@ -737,6 +745,16 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   // that/it X") doesn't collide with anything else.
   const revision = await attemptProposalRevision(rawGoal, providedTaskId, onEvent, signal, sessionId);
   if (revision) return revision;
+
+  // Checkpoint 27 — the one bounded, read-only briefing follow-up ("Tell
+  // me more about the second item."), resolved against the small
+  // session-scoped reference list the last briefing left behind. Checked
+  // here (same tier as CP25's revision) since its trigger vocabulary
+  // ("tell me more about the Nth item") doesn't collide with anything else
+  // and, like revision, operates on stored structured state rather than
+  // needing goal-rewriting.
+  const briefingFollowUp = await attemptBriefingFollowUp(rawGoal, providedTaskId, onEvent, signal, sessionId);
+  if (briefingFollowUp) return briefingFollowUp;
 
   // Checkpoint 22 — bounded reference resolution (pronouns, "what about
   // Friday?"-style date follow-ups). May rewrite the goal into a fully-
@@ -1108,6 +1126,20 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
   if (orchestration) {
     const taskId = providedTaskId || nanoid();
     return attemptOrchestration(goal, taskId, onEvent, signal, orchestration);
+  }
+
+  // Checkpoint 27 — the daily-briefing intent is checked here, for the
+  // same reason orchestration is checked before single-capability
+  // detectors: a briefing sentence can contain words a single capability's
+  // OWN classifier might otherwise claim first (e.g. "today"), silently
+  // truncating the request. detectBriefingIntent() only ever matches its
+  // own small fixed grammar (see briefing/intent.ts) — anything else
+  // returns null immediately and falls through to the unchanged routing
+  // below, exactly like tryOrchestration().
+  const briefingIntent = detectBriefingIntent(goal);
+  if (briefingIntent) {
+    const taskId = providedTaskId || nanoid();
+    return runBriefing(briefingIntent, onEvent, signal, sessionId, taskId);
   }
 
   // Checkpoint 18/20 §7/§14 — Calendar and Tasks intent are both checked

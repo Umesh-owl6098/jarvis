@@ -43,7 +43,7 @@ export interface ExecutionResult {
    * in scripts/tests that bypass task-manager.ts).
    */
   capability?: {
-    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'preferences' | 'unsupported';
+    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'preferences' | 'unsupported' | 'briefing';
     reason: string;
     fallbackCapability?: 'browser';
     readAttempted: boolean;
@@ -116,6 +116,22 @@ export interface ExecutionResult {
     operation: 'set' | 'get' | 'forget';
     field: 'meetingDurationMinutes' | 'emailStyle' | 'defaultMeetingLocation' | 'all';
     snapshot: { meetingDurationMinutes?: number; emailStyle?: string; defaultMeetingLocation?: string };
+  };
+  /**
+   * Checkpoint 27: set only when the read-only daily-briefing synthesis
+   * handled this task — source statuses and counts only, for observability.
+   * Deliberately no raw Calendar/Tasks/Gmail content here (that's what the
+   * rendered `result` string already safely contains) — mirrors gmail/
+   * calendar/tasks/orchestration's own "status + counts, never payloads"
+   * discipline above.
+   */
+  briefing?: {
+    scope: { daysFromNow: number; dayLabel: string; dayPart: 'morning' | 'afternoon' | 'evening' | null };
+    calendarStatus: 'ok' | 'unavailable' | 'failed';
+    tasksStatus: 'ok' | 'unavailable' | 'failed';
+    gmailStatus: 'ok' | 'unavailable' | 'failed';
+    attentionCount: number;
+    attentionTotalCount: number;
   };
   /**
    * Checkpoint 14: the committed target (if any), for cross-subgoal result

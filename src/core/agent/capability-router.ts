@@ -28,7 +28,10 @@ import type { ReadSource } from '@/core/capabilities/read';
 // single-capability check (see orchestrator.ts): a small, fixed set of
 // compound-request SHAPES, each decomposed into steps that reuse the
 // EXISTING single-capability detect/run functions directly.
-export type Capability = 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration';
+// Checkpoint 27 — 'briefing' is the same kind of entry: intercepted in
+// task-manager.ts before any single-capability check (see
+// briefing/intent.ts), never returned by routeCapability() itself.
+export type Capability = 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'briefing';
 
 export interface CapabilityDecision {
   selectedCapability: Capability;

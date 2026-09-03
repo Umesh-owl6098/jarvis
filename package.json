@@ -77,7 +77,13 @@
     "test:cp26-workflow-dependencies-safety": "tsx src/scripts/test-cp26-workflow-dependencies-safety.ts",
     "test:cp26-workflow-injection": "tsx src/scripts/test-cp26-workflow-injection.ts",
     "test:cp26-workflow-conversation-session": "tsx src/scripts/test-cp26-workflow-conversation-session.ts",
-    "test:cp26-workflow-cancellation": "tsx src/scripts/test-cp26-workflow-cancellation.ts"
+    "test:cp26-workflow-cancellation": "tsx src/scripts/test-cp26-workflow-cancellation.ts",
+    "test:cp27-briefing-parsing": "tsx src/scripts/test-cp27-briefing-parsing.ts",
+    "test:cp27-briefing-priority": "tsx src/scripts/test-cp27-briefing-priority.ts",
+    "test:cp27-briefing-safety-injection": "tsx src/scripts/test-cp27-briefing-safety-injection.ts",
+    "test:cp27-briefing-failure-empty": "tsx src/scripts/test-cp27-briefing-failure-empty.ts",
+    "test:cp27-briefing-session-followup": "tsx src/scripts/test-cp27-briefing-session-followup.ts",
+    "test:cp27-briefing-reference-privacy": "tsx src/scripts/test-cp27-briefing-reference-privacy.ts"
   },
   "keywords": [],
   "author": "",
