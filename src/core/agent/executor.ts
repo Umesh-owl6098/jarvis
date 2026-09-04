@@ -43,7 +43,7 @@ export interface ExecutionResult {
    * in scripts/tests that bypass task-manager.ts).
    */
   capability?: {
-    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'preferences' | 'unsupported' | 'briefing' | 'attention';
+    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'preferences' | 'unsupported' | 'briefing' | 'attention' | 'reminders';
     reason: string;
     fallbackCapability?: 'browser';
     readAttempted: boolean;
@@ -145,6 +145,21 @@ export interface ExecutionResult {
     gmailStatus: 'ok' | 'unavailable' | 'failed';
     urgentCount: number;
     urgentTotalCount: number;
+  };
+  /**
+   * Checkpoint 29: set only when the Reminders capability handled this
+   * task — which operation ran, and (for a proposal, or a just-consumed
+   * confirmation) the pending action state for observability. Optional
+   * and additive, same shape discipline as `gmail`/`calendar`/`tasks`
+   * above. Never a raw reminder-text payload beyond what the operation
+   * itself already needs to display — no session transcript, no
+   * unrelated reminder content.
+   */
+  reminders?: {
+    operation: 'list' | 'next' | 'propose_create' | 'propose_cancel' | 'confirm_noop' | 'create' | 'cancel';
+    count?: number;
+    pendingAction?: { type: 'reminder_create' | 'reminder_cancel'; text: string; triggerAt: string; confirmationRequired: true };
+    resultReminderId?: string;
   };
   /**
    * Checkpoint 14: the committed target (if any), for cross-subgoal result

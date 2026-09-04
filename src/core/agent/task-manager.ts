@@ -44,7 +44,7 @@ import { getTasksClient, tasksAvailability } from '@/core/capabilities/tasks/res
 import { tasksPendingActionStore, type TasksPendingActionType } from '@/core/capabilities/tasks/pending-action';
 import { formatDueDate } from '@/core/capabilities/tasks/datetime';
 import { tryOrchestration } from './orchestrator';
-import { isCancelAllPhrase, activePendingCapabilities, clearPending, describeAmbiguousCancel, describeAmbiguousConfirm } from '@/core/capabilities/shared/multi-pending';
+import { isCancelAllPhrase, isBulkConfirmPhrase, activePendingCapabilities, clearPending, describeAmbiguousCancel, describeAmbiguousConfirm } from '@/core/capabilities/shared/multi-pending';
 import { conversationContext } from './conversation-context';
 import { isStartOverPhrase, resolveConversationContext } from './context-resolver';
 import { attemptProposalRevision, clearRevisionAmbiguity } from './proposal-revision';
@@ -58,6 +58,10 @@ import { detectBriefingIntent } from './briefing/intent';
 import { runBriefing, attemptBriefingFollowUp, briefingReferenceStore } from './briefing/runner';
 import { detectAttentionIntent } from './attention/intent';
 import { runAttentionCheck } from './attention/runner';
+import { detectReminderIntent } from '@/core/reminders/intent';
+import { runReminderIntent, attemptReminderConfirmation } from '@/core/reminders/runner';
+import { reminderPendingActionStore } from '@/core/reminders/pending-action';
+import { isAmbiguousReminderConfirmPhrase, isReminderRejectPhrase, isReminderSpecificConfirmPhrase, isReminderSpecificCancelPhrase } from '@/core/reminders/confirm-phrases';
 
 export interface RunTaskOptions {
   goal: string;
@@ -685,6 +689,7 @@ export async function runTask(options: RunTaskOptions): Promise<ExecutionResult>
   tasksPendingActionStore.pruneExpired();
   pendingSlotStore.pruneAllExpired();
   briefingReferenceStore.pruneAllExpired();
+  reminderPendingActionStore.pruneExpired();
 
   // Checkpoint 22 §"Context expiry/reset" — "Forget that."/"Start over."
   // clears ONLY the new conversational-reference state (dateRef/
@@ -802,6 +807,7 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
   const gmailPendingActive = !!pendingActionStore.active(sessionId);
   const calendarPendingActive = !!calendarPendingActionStore.active(sessionId);
   const tasksPendingActive = !!tasksPendingActionStore.active(sessionId);
+  const remindersPendingActive = !!reminderPendingActionStore.active(sessionId);
 
   // Checkpoint 22 fix — a confirm phrase is only genuinely UNAMBIGUOUS when
   // it names the SAME action type as what's actually pending. Caught via
@@ -912,8 +918,8 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
   // capabilities mid-confirmation simultaneously), a bare word is genuinely
   // ambiguous and is NOT resolved here — §6/§9's "do not guess" applies to
   // which capability it refers to, not just to dates/times.
-  if (isAmbiguousCalendarConfirmPhrase(goal) || isSendConfirmationPhrase(goal) || isAmbiguousTasksConfirmPhrase(goal)) {
-    const activeCount = [gmailPendingActive, calendarPendingActive, tasksPendingActive].filter(Boolean).length;
+  if (isAmbiguousCalendarConfirmPhrase(goal) || isSendConfirmationPhrase(goal) || isAmbiguousTasksConfirmPhrase(goal) || isAmbiguousReminderConfirmPhrase(goal)) {
+    const activeCount = [gmailPendingActive, calendarPendingActive, tasksPendingActive, remindersPendingActive].filter(Boolean).length;
     if (activeCount === 1) {
       if (calendarPendingActive) {
         const taskId = providedTaskId || nanoid();
@@ -926,6 +932,10 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
       if (tasksPendingActive) {
         const taskId = providedTaskId || nanoid();
         return attemptTasksConfirmation(goal, taskId, onEvent, signal, sessionId);
+      }
+      if (remindersPendingActive) {
+        const taskId = providedTaskId || nanoid();
+        return attemptReminderConfirmation(goal, taskId, onEvent, sessionId);
       }
     }
     if (activeCount >= 2) {
@@ -946,6 +956,25 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
     }
     // none active — fall through; no capability claims an ambiguous bare
     // word with nothing pending anywhere.
+  }
+
+  // Checkpoint 29 HOLD — "Confirm all."/"Confirm everything."/"Approve
+  // all."/"Approve everything." are intercepted here, UNCONDITIONALLY —
+  // regardless of how many things are pending, even zero — so they can
+  // NEVER fall through to generic browser/OmniRoute routing and be
+  // misread as an ordinary command. There is no bulk-confirm operation in
+  // this codebase (mirrors §13's "no Confirm all" requirement); this
+  // always blocks, never mutates, never claims anything was confirmed,
+  // and leaves every pending proposal (if any) completely untouched.
+  if (isBulkConfirmPhrase(goal)) {
+    const taskId = providedTaskId || nanoid();
+    const resultText = "I can't confirm multiple pending actions at once. Please specify which action to confirm.";
+    onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'orchestration' as any } });
+    return {
+      taskId, goal, status: 'success', outcome: 'blocked', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [],
+      capability: { selected: 'orchestration', reason: 'Bulk-confirm phrase rejected — no bulk confirmation exists.', readAttempted: false, browserFallbackUsed: false },
+    };
   }
 
   // Checkpoint 21 fix — capability-UNAMBIGUOUS cancel phrases (the phrase's
@@ -973,7 +1002,7 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
     const slotActive = !!pendingSlotStore.active(sessionId);
     if (active.length > 0 || slotActive) {
       for (const cap of active) clearPending(sessionId, cap);
-      const parts: string[] = active.map((c) => (c === 'calendar' ? 'the calendar change' : c === 'gmail' ? 'the email draft' : 'the task change'));
+      const parts: string[] = active.map((c) => (c === 'calendar' ? 'the calendar change' : c === 'gmail' ? 'the email draft' : c === 'tasks' ? 'the task change' : 'the reminder'));
       if (slotActive) {
         parts.push('the pending question');
         pendingSlotStore.clear(sessionId);
@@ -1003,6 +1032,18 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
   // workflow. Deliberately type-agnostic (dispatches to whatever
   // create/update/delete type is ACTUALLY stored), unlike "Create it."/
   // "Update it." above.
+  // Checkpoint 29 — checked BEFORE Calendar/Tasks/Gmail's own specific
+  // confirm phrases: Tasks' own isTasksSpecificConfirmPhrase ALSO matches
+  // "confirm the reminder" (CP20's long-standing "reminder" == Task
+  // synonym), so this tier must win first whenever a reminder is actually
+  // pending — see confirm-phrases.ts's own module comment for the full
+  // collision reasoning. Falls through unchanged to Tasks' own tier when
+  // no reminder is pending (remindersPendingActive is false), preserving
+  // Tasks' pre-existing "confirm the reminder" behavior exactly.
+  if (isReminderSpecificConfirmPhrase(goal) && remindersPendingActive) {
+    const taskId = providedTaskId || nanoid();
+    return attemptReminderConfirmation(goal, taskId, onEvent, sessionId);
+  }
   if (isCalendarSpecificConfirmPhrase(goal) && calendarPendingActive) {
     const taskId = providedTaskId || nanoid();
     return attemptCalendarConfirmation(goal, taskId, onEvent, signal, sessionId);
@@ -1016,6 +1057,18 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
     return attemptGmailSendConfirmation(goal, taskId, onEvent, signal, sessionId);
   }
 
+  // Checkpoint 29 — same "checked before Tasks' own aliasing regex" reasoning as the specific-confirm tier above. Generic "change was not made" wording (like Calendar's/Tasks' own cancel tier) deliberately covers BOTH pending types — a pending reminder_create being rejected (nothing scheduled) and a pending reminder_cancel being rejected (the original reminder stays scheduled, untouched) — without needing to distinguish which.
+  if (isReminderSpecificCancelPhrase(goal) && remindersPendingActive) {
+    reminderPendingActionStore.clear(sessionId);
+    const taskId = providedTaskId || nanoid();
+    const resultText = 'Cancelled — the reminder change was not made.';
+    onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'reminders' as any } });
+    return {
+      taskId, goal, status: 'success', outcome: 'completed', result: resultText,
+      steps: 0, tokensUsed: 0, actions: [], events: [],
+      capability: { selected: 'reminders', reason: 'Explicit cancellation of a pending Reminder action.', readAttempted: false, browserFallbackUsed: false },
+    };
+  }
   if (isCalendarSpecificCancelPhrase(goal) && calendarPendingActive) {
     calendarPendingActionStore.clear(sessionId);
     const taskId = providedTaskId || nanoid();
@@ -1058,7 +1111,7 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
   // through: §9's "do not guess" applies to cancellation exactly as much
   // as to confirmation. Checked only after the unambiguous, noun-specific
   // phrases above already had their chance.
-  const isAmbiguousCancel = isCalendarRejectPhrase(goal) || isTasksRejectPhrase(goal) || isSendCancelPhrase(goal);
+  const isAmbiguousCancel = isCalendarRejectPhrase(goal) || isTasksRejectPhrase(goal) || isSendCancelPhrase(goal) || isReminderRejectPhrase(goal);
   if (isAmbiguousCancel) {
     const active = activePendingCapabilities(sessionId);
     if (active.length === 1) {
@@ -1083,6 +1136,16 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
           steps: 0, tokensUsed: 0, actions: [], events: [],
           capability: { selected: 'gmail', reason: 'Explicit cancellation of a pending Gmail send.', readAttempted: false, browserFallbackUsed: false },
           gmail: { operation: 'send' },
+        };
+      }
+      if (cap === 'reminder') {
+        reminderPendingActionStore.clear(sessionId);
+        const resultText = 'Cancelled — the reminder change was not made.';
+        onEvent({ type: 'agent.completed', timestamp: Date.now(), taskId, data: { result: resultText, capability: 'reminders' as any } });
+        return {
+          taskId, goal, status: 'success', outcome: 'completed', result: resultText,
+          steps: 0, tokensUsed: 0, actions: [], events: [],
+          capability: { selected: 'reminders', reason: 'Explicit cancellation of a pending Reminder action.', readAttempted: false, browserFallbackUsed: false },
         };
       }
       tasksPendingActionStore.clear(sessionId);
@@ -1174,6 +1237,22 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
   if (calendarIntent) {
     const taskId = providedTaskId || nanoid();
     return attemptCalendar(goal, taskId, onEvent, signal, sessionId);
+  }
+
+  // Checkpoint 29 — checked BEFORE Tasks, deliberately: Tasks' own
+  // TASKS_CONCEPT_RE treats "reminder(s)" as a synonym for "task" (CP20's
+  // long-standing vocabulary choice), so a bare Tasks-style personal query
+  // like "What reminders do I have?" would otherwise be claimed by Tasks'
+  // own generic concept-word fallback. This module's own create trigger is
+  // structurally disjoint from Tasks' "remind me to X" (it requires a time
+  // phrase BETWEEN "remind me" and "to" — see reminders/intent.ts's own
+  // module comment), so there is no risk of this stealing Tasks' bare
+  // "remind me to X" Task-creation phrasing; only reminder-specific
+  // list/next/cancel/timed-create phrasing is ever recognized here.
+  const reminderIntent = detectReminderIntent(goal);
+  if (reminderIntent) {
+    const taskId = providedTaskId || nanoid();
+    return runReminderIntent(reminderIntent, onEvent, signal, sessionId, taskId);
   }
 
   const tasksIntent = detectTasksIntent(goal);

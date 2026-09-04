@@ -88,7 +88,15 @@
     "test:cp28-attention-engine": "tsx src/scripts/test-cp28-attention-engine.ts",
     "test:cp28-attention-privacy": "tsx src/scripts/test-cp28-attention-privacy.ts",
     "test:cp28-attention-failure-empty": "tsx src/scripts/test-cp28-attention-failure-empty.ts",
-    "test:cp28-attention-state-safety": "tsx src/scripts/test-cp28-attention-state-safety.ts"
+    "test:cp28-attention-state-safety": "tsx src/scripts/test-cp28-attention-state-safety.ts",
+    "test:cp29-reminders-intent": "tsx src/scripts/test-cp29-reminders-intent.ts",
+    "test:cp29-reminders-datetime": "tsx src/scripts/test-cp29-reminders-datetime.ts",
+    "test:cp29-reminders-persistence": "tsx src/scripts/test-cp29-reminders-persistence.ts",
+    "test:cp29-reminders-confirmation": "tsx src/scripts/test-cp29-reminders-confirmation.ts",
+    "test:cp29-reminders-delivery": "tsx src/scripts/test-cp29-reminders-delivery.ts",
+    "test:cp29-reminders-security": "tsx src/scripts/test-cp29-reminders-security.ts",
+    "test:cp29-reminders-reads": "tsx src/scripts/test-cp29-reminders-reads.ts",
+    "test:cp29-reminders-regression": "tsx src/scripts/test-cp29-reminders-regression.ts"
   },
   "keywords": [],
   "author": "",

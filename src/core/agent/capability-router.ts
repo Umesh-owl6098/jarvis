@@ -34,7 +34,7 @@ import type { ReadSource } from '@/core/capabilities/read';
 // Checkpoint 28 — 'attention' is the same, checked even earlier (see
 // attention/intent.ts) so its narrow "right now"/"soon" phrasing gets
 // first refusal ahead of CP27's own broader day-scoped triggers.
-export type Capability = 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'briefing' | 'attention';
+export type Capability = 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'briefing' | 'attention' | 'reminders';
 
 export interface CapabilityDecision {
   selectedCapability: Capability;

@@ -99,6 +99,7 @@ export default function Home() {
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [routerLabel, setRouterLabel] = useState<string>('—');
   const [routerIsMock, setRouterIsMock] = useState(false);
+  const [dueReminders, setDueReminders] = useState<{ reminderId: string; text: string; triggerAt: string; deliveredAt: string }[]>([]);
   const [visualState, setVisualState] = useState<VisualState>({ agentState: 'idle' });
   const [bp, setBp] = useState<Breakpoint>('xl');
   const [liveMs, setLiveMs] = useState<number | null>(null);
@@ -218,6 +219,37 @@ export default function Home() {
       mounted = false;
       clearInterval(interval);
     };
+  }, []);
+
+  // Checkpoint 29 §11 — reminder delivery via polling, same established
+  // shape as the health check above (this app's SSE stream is
+  // request-scoped and cannot push an event from a background timer — see
+  // the CP29 architecture report). Each poll DRAINS the server-side queue,
+  // so a delivery is only ever appended to local UI state once.
+  useEffect(() => {
+    let mounted = true;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/reminders/due');
+        const data = await res.json();
+        if (!mounted || !Array.isArray(data.deliveries) || data.deliveries.length === 0) return;
+        setDueReminders((prev) => [...prev, ...data.deliveries]);
+      } catch {
+        // A failed poll is silently retried on the next tick — reminders
+        // are never lost by a missed poll, since the server-side queue
+        // only drains on a SUCCESSFUL fetch (see /api/reminders/due).
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 15_000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const dismissReminder = useCallback((reminderId: string) => {
+    setDueReminders((prev) => prev.filter((r) => r.reminderId !== reminderId));
   }, []);
 
   /* ---------- execution (unchanged wiring) ---------- */
@@ -505,6 +537,39 @@ export default function Home() {
 
   return (
     <main className="relative h-[100dvh] w-screen overflow-hidden bg-[color:var(--j-void)]">
+      {/* Checkpoint 29 — due-reminder delivery banner. In-app only (no OS/browser Notification API — optional and deliberately out of scope for this checkpoint). Visually distinct from the agent's own result panel so a reminder is never mistaken for a live task response. */}
+      {dueReminders.length > 0 && (
+        <div className="pointer-events-none absolute right-3 top-14 z-[60] flex w-[min(340px,90vw)] flex-col gap-2">
+          {dueReminders.map((r) => (
+            <div
+              key={r.reminderId}
+              className="pointer-events-auto rounded-md px-3 py-2 shadow-lg"
+              style={{
+                background: 'var(--j-panel)',
+                border: '1px solid var(--j-accent-line)',
+                boxShadow: '0 0 18px rgba(46,230,255,0.18)',
+              }}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <span className="j-label" style={{ color: 'var(--j-accent)', letterSpacing: '0.14em', fontSize: '10px' }}>
+                  REMINDER
+                </span>
+                <button
+                  type="button"
+                  onClick={() => dismissReminder(r.reminderId)}
+                  className="j-num text-[10px]"
+                  style={{ color: 'var(--j-mute)' }}
+                  aria-label="Dismiss reminder"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="mt-1 text-[13px] leading-snug text-[color:var(--j-ink)]">{r.text}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* 3D environment — always the bottom layer, never unmounted */}
       <div className="absolute inset-0 z-0">
         <JarvisScene

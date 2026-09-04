@@ -34,3 +34,8 @@ graphify-out/
 # User preferences (Checkpoint 23) — local-only persistent config, never
 # committed, and deliberately never the same file as OAuth tokens above.
 .jarvis-preferences.json
+
+# Scheduled reminders (Checkpoint 29) — local-only persistent state, never
+# committed, and deliberately its own separate file — never the same file
+# as OAuth tokens or preferences above.
+.jarvis-reminders.json
