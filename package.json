@@ -83,7 +83,12 @@
     "test:cp27-briefing-safety-injection": "tsx src/scripts/test-cp27-briefing-safety-injection.ts",
     "test:cp27-briefing-failure-empty": "tsx src/scripts/test-cp27-briefing-failure-empty.ts",
     "test:cp27-briefing-session-followup": "tsx src/scripts/test-cp27-briefing-session-followup.ts",
-    "test:cp27-briefing-reference-privacy": "tsx src/scripts/test-cp27-briefing-reference-privacy.ts"
+    "test:cp27-briefing-reference-privacy": "tsx src/scripts/test-cp27-briefing-reference-privacy.ts",
+    "test:cp28-attention-parsing": "tsx src/scripts/test-cp28-attention-parsing.ts",
+    "test:cp28-attention-engine": "tsx src/scripts/test-cp28-attention-engine.ts",
+    "test:cp28-attention-privacy": "tsx src/scripts/test-cp28-attention-privacy.ts",
+    "test:cp28-attention-failure-empty": "tsx src/scripts/test-cp28-attention-failure-empty.ts",
+    "test:cp28-attention-state-safety": "tsx src/scripts/test-cp28-attention-state-safety.ts"
   },
   "keywords": [],
   "author": "",

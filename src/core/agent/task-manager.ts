@@ -56,6 +56,8 @@ import { pendingSlotStore } from './pending-slot';
 import { attemptPendingSlotCompletion, recordGmailDraftBodySlot, recordCalendarDatetimeSlot } from './pending-slot-resolver';
 import { detectBriefingIntent } from './briefing/intent';
 import { runBriefing, attemptBriefingFollowUp, briefingReferenceStore } from './briefing/runner';
+import { detectAttentionIntent } from './attention/intent';
+import { runAttentionCheck } from './attention/runner';
 
 export interface RunTaskOptions {
   goal: string;
@@ -1126,6 +1128,23 @@ async function runTaskCore(options: RunTaskOptions): Promise<ExecutionResult> {
   if (orchestration) {
     const taskId = providedTaskId || nanoid();
     return attemptOrchestration(goal, taskId, onEvent, signal, orchestration);
+  }
+
+  // Checkpoint 28 — the personal-attention check is checked BEFORE the
+  // daily-briefing intent, deliberately: its own trigger phrases for the
+  // two shapes it shares vocabulary with CP27 ("what needs my attention
+  // right now", "what's coming up/anything coming up soon") are narrowed
+  // to require "right now"/"soon" specifically, so this can never steal
+  // CP27's own day-scoped or bare phrasing ("...today?", "...tomorrow?",
+  // bare "What's coming up?") — those simply don't match this module's
+  // narrower grammar and fall through to the CP27 check below completely
+  // unchanged. See attention/intent.ts's own module comment for the full
+  // CP27-boundary reasoning (including why "What should I handle first?"
+  // is deliberately NOT claimed here).
+  const attentionIntent = detectAttentionIntent(goal);
+  if (attentionIntent) {
+    const taskId = providedTaskId || nanoid();
+    return runAttentionCheck(attentionIntent, onEvent, signal, sessionId, taskId);
   }
 
   // Checkpoint 27 — the daily-briefing intent is checked here, for the

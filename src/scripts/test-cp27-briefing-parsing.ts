@@ -51,6 +51,13 @@ function scopeFor(daysFromNow: number, dayLabel: string): ParsedBriefingIntent {
   return { kind: 'briefing', scope: { daysFromNow, dayLabel, dayPart: null, rangeStart: range.start, rangeEnd: range.end } };
 }
 
+/** A fixed LOCAL time (today's real date, 8:30am) safely before the shared MockCalendarClient fixture's 9am "Team Standup" event — see test 12's own comment for why this replaces a runtime-relative event time. */
+function fixedMorningNow(): Date {
+  const d = new Date();
+  d.setHours(8, 30, 0, 0);
+  return d;
+}
+
 async function main() {
   // ---------- 1-9. Intent/routing: required positive examples ----------
   const positives: [string, string][] = [
@@ -128,7 +135,17 @@ async function main() {
     check('11b. structured briefing.calendarStatus is ok', r.briefing?.calendarStatus === 'ok');
   }
   {
-    const r = await runBriefing(scopeFor(0, 'today'), () => {}, undefined, SID, nanoid());
+    // The shared fixture's own "today" event (e1, "Team Standup" at a fixed
+    // 9:00-9:15am local hour) has already ended by the time this suite runs
+    // later in the day, which would make "next event" legitimately absent
+    // for reasons having nothing to do with what this test checks. Rather
+    // than compute a runtime-relative event time (which can itself land on
+    // an edge case, e.g. near local midnight), inject a FIXED, safely-early
+    // `now` into runBriefing() — a pre-existing, public testing seam, no
+    // production change — anchored to the real "today" DATE but a fixed
+    // TIME-of-day before 9am, so the fixture's own event is reliably still
+    // upcoming regardless of what real wall-clock time this suite runs at.
+    const r = await runBriefing(scopeFor(0, 'today'), () => {}, undefined, SID, nanoid(), fixedMorningNow());
     check('12. next event is surfaced', /next meeting is at/i.test(r.result), `result=${r.result.slice(0, 200)}`);
   }
   {

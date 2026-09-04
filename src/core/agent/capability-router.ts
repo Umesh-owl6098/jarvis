@@ -31,7 +31,10 @@ import type { ReadSource } from '@/core/capabilities/read';
 // Checkpoint 27 — 'briefing' is the same kind of entry: intercepted in
 // task-manager.ts before any single-capability check (see
 // briefing/intent.ts), never returned by routeCapability() itself.
-export type Capability = 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'briefing';
+// Checkpoint 28 — 'attention' is the same, checked even earlier (see
+// attention/intent.ts) so its narrow "right now"/"soon" phrasing gets
+// first refusal ahead of CP27's own broader day-scoped triggers.
+export type Capability = 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'briefing' | 'attention';
 
 export interface CapabilityDecision {
   selectedCapability: Capability;

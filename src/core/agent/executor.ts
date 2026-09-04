@@ -43,7 +43,7 @@ export interface ExecutionResult {
    * in scripts/tests that bypass task-manager.ts).
    */
   capability?: {
-    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'preferences' | 'unsupported' | 'briefing';
+    selected: 'read' | 'browser' | 'gmail' | 'calendar' | 'tasks' | 'orchestration' | 'preferences' | 'unsupported' | 'briefing' | 'attention';
     reason: string;
     fallbackCapability?: 'browser';
     readAttempted: boolean;
@@ -132,6 +132,19 @@ export interface ExecutionResult {
     gmailStatus: 'ok' | 'unavailable' | 'failed';
     attentionCount: number;
     attentionTotalCount: number;
+  };
+  /**
+   * Checkpoint 28: set only when the read-only personal-attention check
+   * handled this task — source statuses and counts only, same "never
+   * payloads" discipline as `briefing` above.
+   */
+  attention?: {
+    scope: { kind: 'right_now' | 'soon' | 'day'; label: string };
+    calendarStatus: 'ok' | 'unavailable' | 'failed';
+    tasksStatus: 'ok' | 'unavailable' | 'failed';
+    gmailStatus: 'ok' | 'unavailable' | 'failed';
+    urgentCount: number;
+    urgentTotalCount: number;
   };
   /**
    * Checkpoint 14: the committed target (if any), for cross-subgoal result

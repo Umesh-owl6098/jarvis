@@ -39,19 +39,25 @@ import type { TaskItem } from '@/core/capabilities/tasks/types';
 
 import { getGmailClient, gmailAvailability } from '@/core/capabilities/gmail/resolve';
 
+import { rankAttentionSignals, MEETING_SOON_MINUTES } from '../attention/engine';
+import type { AttentionSignal } from '../attention/types';
+
 function isAbortError(e: any): boolean {
   return e?.name === 'AbortError' || e?.code === 'ABORTED' || /aborted|cancelled/i.test(e?.message ?? '');
 }
 
-// A meeting counts as "starting soon" within this window — named constant,
-// not a magic number, per the checkpoint's own instruction.
-const MEETING_SOON_MINUTES = 60;
+// Checkpoint 28 — the "starting soon"/60-minute window is now owned by
+// attention/engine.ts (MEETING_SOON_MINUTES, imported above) so Checkpoint
+// 27 and 28 share the exact same threshold rather than risking two
+// independently-tuned copies drifting apart. Re-exported here so any
+// existing importer of this module keeps working unchanged.
+export { MEETING_SOON_MINUTES };
 // Detailed attention list cap — ONE concise default (no separate voice-mode
 // flag: the execution architecture has no signal to distinguish voice from
 // typed input, so rather than invent a fake flag, one bounded default is
 // used for both, with full counts always stated separately so nothing is
 // silently omitted).
-const MAX_ATTENTION_ITEMS = 5;
+export const MAX_ATTENTION_ITEMS = 5;
 // How many recent Gmail messages to inspect for unread signals. Gmail has
 // no date-range list endpoint (see gmail/types.ts's GmailClient) so this is
 // "most recent N overall," not scoped to the requested day — an honest,
@@ -68,7 +74,7 @@ function toCalendarView(e: CalendarEvent): BriefingCalendarEventView {
   return { id: e.id, title: e.title, start: e.start, end: e.end, timezone: e.timezone, location: e.location, attendees: e.attendees };
 }
 
-async function fetchCalendarData(scope: BriefingScope, now: Date, signal?: AbortSignal): Promise<BriefingCalendarData> {
+export async function fetchCalendarData(scope: BriefingScope, now: Date, signal?: AbortSignal): Promise<BriefingCalendarData> {
   const avail = calendarAvailability();
   if (!avail.available) {
     return { status: 'unavailable', reason: avail.reason, remainingCount: 0, events: [] };
@@ -98,7 +104,7 @@ function toTaskView(t: TaskItem): BriefingTaskView {
   return { id: t.id, taskListId: t.taskListId, title: t.title, due: t.due };
 }
 
-async function fetchTasksData(scope: BriefingScope, now: Date, signal?: AbortSignal): Promise<BriefingTasksData> {
+export async function fetchTasksData(scope: BriefingScope, now: Date, signal?: AbortSignal): Promise<BriefingTasksData> {
   const avail = tasksAvailability();
   if (!avail.available) {
     return { status: 'unavailable', reason: avail.reason, overdueCount: 0, dueTodayCount: 0, incompleteCount: 0, overdue: [], dueToday: [] };
@@ -140,7 +146,7 @@ async function fetchTasksData(scope: BriefingScope, now: Date, signal?: AbortSig
 // Gmail
 // ============================================================
 
-async function fetchGmailData(signal?: AbortSignal): Promise<BriefingGmailData> {
+export async function fetchGmailData(signal?: AbortSignal): Promise<BriefingGmailData> {
   const avail = gmailAvailability();
   if (!avail.available) {
     return { status: 'unavailable', reason: avail.reason, recentCount: 0, unreadCount: 0, unread: [] };
@@ -168,70 +174,57 @@ async function fetchGmailData(signal?: AbortSignal): Promise<BriefingGmailData> 
 // reading email bodies, no guessed relationships.
 // ============================================================
 
+/**
+ * Checkpoint 28 — thin adapter over the SHARED classifier
+ * (attention/engine.ts's rankAttentionSignals). All tiering, ordering, and
+ * tie-breaking now lives in exactly one place; this function's only job is
+ * translating the engine's normalized AttentionSignal[] into this
+ * checkpoint's own AttentionItem/BriefingItemRef shapes and its own
+ * (Checkpoint-27-specific) sentence wording — the render text intentionally
+ * differs from Checkpoint 28's own wording, only the classification is
+ * shared. Produces byte-identical output to the pre-extraction
+ * implementation (see the CP28 regression suite).
+ */
 function buildAttention(calendar: BriefingCalendarData, tasks: BriefingTasksData, gmail: BriefingGmailData, now: Date, dayLabel: string): AttentionItem[] {
-  const items: AttentionItem[] = [];
+  const signals = rankAttentionSignals(
+    { calendarEvents: calendar.events, tasksOverdue: tasks.overdue, tasksDueInScope: tasks.dueToday, gmailUnread: gmail.unread },
+    now,
+    MEETING_SOON_MINUTES
+  );
+  const eventById = new Map(calendar.events.map((e) => [e.id, e]));
+  const mailById = new Map(gmail.unread.map((m) => [m.id, m]));
 
-  // Tier 1a — overdue tasks (most overdue first; alphabetical tie-break).
-  const overdueSorted = [...tasks.overdue].sort((a, b) => {
-    const byDue = (a.due ?? '').localeCompare(b.due ?? '');
-    return byDue !== 0 ? byDue : a.title.localeCompare(b.title);
+  // Builds the key set conditionally (never an explicit `taskListId:
+  // undefined` property) — a plain object literal with `taskListId:
+  // s.taskListId` would still create the KEY even when the value is
+  // undefined, which is a real, different shape from the original
+  // per-branch literals that omitted the key entirely for calendar/gmail.
+  const toRef = (s: AttentionSignal): BriefingItemRef =>
+    s.taskListId !== undefined
+      ? { capability: s.source, id: s.id, taskListId: s.taskListId, label: s.label }
+      : { capability: s.source, id: s.id, label: s.label };
+
+  return signals.map((s): AttentionItem => {
+    const ref = toRef(s);
+    switch (s.reason) {
+      case 'task_overdue':
+        return { tier: s.tier, ref, label: `Overdue task: ${s.label}` };
+      case 'task_due':
+        return { tier: s.tier, ref, label: `Due ${dayLabel}: ${s.label} (${s.timestamp ? formatDueDate(s.timestamp) : 'no date'})` };
+      case 'meeting_soon': {
+        const e = eventById.get(s.id)!;
+        return { tier: s.tier, ref, label: `Meeting at ${formatLocal(e.start, e.timezone)} with ${e.title}` };
+      }
+      case 'meeting_upcoming': {
+        const e = eventById.get(s.id)!;
+        return { tier: s.tier, ref, label: `Meeting at ${formatLocal(e.start, e.timezone)}: ${e.title}` };
+      }
+      case 'unread_mail': {
+        const m = mailById.get(s.id)!;
+        return { tier: s.tier, ref, label: `Recent email from ${m.from}: ${m.subject}` };
+      }
+    }
   });
-  for (const t of overdueSorted) {
-    items.push({
-      tier: 1,
-      ref: { capability: 'tasks', id: t.id, taskListId: t.taskListId, label: t.title },
-      label: `Overdue task: ${t.title}`,
-    });
-  }
-
-  // Tier 1b — meetings starting within MEETING_SOON_MINUTES of `now`.
-  const soonCutoff = now.getTime() + MEETING_SOON_MINUTES * 60000;
-  const soonMeetings = calendar.events.filter((e) => {
-    const start = new Date(e.start).getTime();
-    return start >= now.getTime() && start <= soonCutoff;
-  });
-  for (const e of soonMeetings) {
-    items.push({
-      tier: 1,
-      ref: { capability: 'calendar', id: e.id, label: e.title },
-      label: `Meeting at ${formatLocal(e.start, e.timezone)} with ${e.title}`,
-    });
-  }
-
-  // Tier 2a — tasks due on the scope day (alphabetical tie-break; all share the same due date already).
-  const dueTodaySorted = [...tasks.dueToday].sort((a, b) => a.title.localeCompare(b.title));
-  for (const t of dueTodaySorted) {
-    items.push({
-      tier: 2,
-      ref: { capability: 'tasks', id: t.id, taskListId: t.taskListId, label: t.title },
-      label: `Due ${dayLabel}: ${t.title} (${t.due ? formatDueDate(t.due) : 'no date'})`,
-    });
-  }
-
-  // Tier 2b — unread recent email, most recent first.
-  const unreadSorted = [...gmail.unread].sort((a, b) => (a.date < b.date ? 1 : -1));
-  for (const m of unreadSorted) {
-    items.push({
-      tier: 2,
-      ref: { capability: 'gmail', id: m.id, label: `${m.subject} — ${m.from}` },
-      label: `Recent email from ${m.from}: ${m.subject}`,
-    });
-  }
-
-  // Tier 3 — later meetings (not "starting soon"), start-time ascending.
-  const laterMeetings = calendar.events.filter((e) => {
-    const start = new Date(e.start).getTime();
-    return start > soonCutoff;
-  });
-  for (const e of laterMeetings) {
-    items.push({
-      tier: 3,
-      ref: { capability: 'calendar', id: e.id, label: e.title },
-      label: `Meeting at ${formatLocal(e.start, e.timezone)}: ${e.title}`,
-    });
-  }
-
-  return items;
 }
 
 // ============================================================

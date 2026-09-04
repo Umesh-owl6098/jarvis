@@ -57,6 +57,29 @@ function scopeForDay(daysFromNow: number, dayLabel = 'today'): ParsedBriefingInt
   return { kind: 'briefing', scope: { daysFromNow, dayLabel, dayPart: null, rangeStart: range.start, rangeEnd: range.end } };
 }
 
+// CP27 HOLD reconciliation — the shared MockCalendarClient fixture has
+// exactly ONE "today" (day-0) event, "Team Standup" at a fixed 9:00-9:15am
+// LOCAL hour (see calendar/mock-client.ts's fixtureEvents()). Once real
+// wall-clock time passes 9:15am, fetchCalendarData's own "remaining" filter
+// (e.end >= now) correctly excludes it, so it produces ZERO calendar
+// signals for the rest of that day — this is correct PRODUCTION behavior,
+// not a bug. But several tests below loop over however many references a
+// "today" briefing actually produces (one check() per reference, or one
+// check() per capability that has a matching reference) — so their own
+// ASSERTION COUNT silently varies with wall-clock time-of-day whenever the
+// calendar signal disappears mid-day, even though every assertion that DOES
+// run still passes. runBriefing()'s own `now` parameter (already a public,
+// existing testing seam — no production change) lets every call in this
+// file anchor to a fixed LOCAL time safely before 9am, so "Team Standup" is
+// always counted, making the total assertion count deterministic at any
+// real run time. Only the TIME-of-day is fixed; the DATE is always today's
+// real date, so day-relative scopes/task-due comparisons are unaffected.
+function fixedNow(): Date {
+  const d = new Date();
+  d.setHours(8, 30, 0, 0);
+  return d;
+}
+
 async function main() {
   clearAll(SID);
   clearAll(SID_B);
@@ -64,7 +87,7 @@ async function main() {
   // ---------- 1. Gmail field-flow: BriefingGmailData.unread carries ONLY the expected keys ----------
   {
     clearAll(SID);
-    const r = await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid());
+    const r = await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid(), fixedNow());
     check('1-setup. real unread Gmail items are present (proves this exercises the real path)', (r.briefing?.attentionCount ?? 0) > 0);
     const refs = briefingReferenceStore.active(SID) ?? [];
     const gmailRefs = refs.filter((x) => x.capability === 'gmail');
@@ -83,7 +106,7 @@ async function main() {
   // ---------- 2. BriefingItemRef shape for Calendar/Tasks also carries only the documented keys ----------
   {
     clearAll(SID);
-    await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid());
+    await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid(), fixedNow());
     const refs = briefingReferenceStore.active(SID) ?? [];
     for (const ref of refs) {
       const keys = Object.keys(ref).sort();
@@ -96,7 +119,7 @@ async function main() {
   // ---------- 3. Gmail follow-up performs NO live Gmail call ----------
   {
     clearAll(SID);
-    await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid());
+    await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid(), fixedNow());
     const refs = briefingReferenceStore.active(SID) ?? [];
     const gmailIdx = refs.findIndex((x) => x.capability === 'gmail');
     check('3-setup. a Gmail reference exists to follow up on', gmailIdx !== -1);
@@ -128,7 +151,7 @@ async function main() {
     // appeared in the original briefing, not that the two label strings
     // are byte-identical.
     clearAll(SID);
-    const briefingResult = await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid());
+    const briefingResult = await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid(), fixedNow());
     const refs = briefingReferenceStore.active(SID) ?? [];
     const gmailIdx = refs.findIndex((x) => x.capability === 'gmail');
     const [subject, from] = refs[gmailIdx].label.split(' — ');
@@ -144,7 +167,7 @@ async function main() {
   // ---------- 5. Reference is NOT authorization — pending stores remain empty after every follow-up type ----------
   {
     clearAll(SID);
-    await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid());
+    await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid(), fixedNow());
     const refs = briefingReferenceStore.active(SID) ?? [];
     for (const cap of ['calendar', 'gmail', 'tasks'] as const) {
       const idx = refs.findIndex((x) => x.capability === cap);
@@ -173,14 +196,14 @@ async function main() {
   // ---------- 7. a NEW briefing replaces the previous session's reference list ----------
   {
     clearAll(SID);
-    await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid());
+    await runBriefing(scopeForDay(0), () => {}, undefined, SID, nanoid(), fixedNow());
     const firstRefs = briefingReferenceStore.active(SID);
     check('7-setup. first briefing produced references', !!firstRefs && firstRefs.length > 0);
 
     // A second briefing for a DIFFERENT, controlled scope (guaranteed no
     // calendar/gmail/tasks-due items — day+60) produces a materially
     // different (near-empty) reference list.
-    await runBriefing(scopeForDay(60, 'that day'), () => {}, undefined, SID, nanoid());
+    await runBriefing(scopeForDay(60, 'that day'), () => {}, undefined, SID, nanoid(), fixedNow());
     const secondRefs = briefingReferenceStore.active(SID);
     check(
       '7. a second briefing REPLACES the first session\'s reference list, not appends to it',
@@ -214,7 +237,7 @@ async function main() {
     for (let i = 0; i < 9; i++) {
       await tasksClient.createTask({ kind: 'create', title: `CP27 Ref Bound Task 9-${i}`, due, taskListId: tasksClient.defaultListId });
     }
-    await runBriefing(scopeForDay(day, 'that day'), () => {}, undefined, SID, nanoid());
+    await runBriefing(scopeForDay(day, 'that day'), () => {}, undefined, SID, nanoid(), fixedNow());
     const refs = briefingReferenceStore.active(SID) ?? [];
     check('9. the reference list itself never exceeds 5 items even with 9+ candidate tasks', refs.length <= 5, `count=${refs.length}`);
     clearAll(SID);
@@ -229,7 +252,7 @@ async function main() {
     const start = new Date(range.start); start.setHours(9, 0, 0, 0);
     const end = new Date(start.getTime() + 1800000);
     const created = await calClient.createEvent({ kind: 'create', title: 'CP27 Stale Event Test', start: start.toISOString(), end: end.toISOString(), timezone: 'UTC', attendees: [] });
-    await runBriefing(scopeForDay(day, 'that day'), () => {}, undefined, SID, nanoid());
+    await runBriefing(scopeForDay(day, 'that day'), () => {}, undefined, SID, nanoid(), fixedNow());
     const refs = briefingReferenceStore.active(SID) ?? [];
     const idx = refs.findIndex((x) => x.capability === 'calendar' && x.id === created.id);
     check('10-setup. the fresh event is actually referenced', idx !== -1, `refs=${JSON.stringify(refs)}`);
@@ -247,7 +270,7 @@ async function main() {
     const tasksClient = getTasksClient();
     const due = dayRangeIso(day).start;
     const created = await tasksClient.createTask({ kind: 'create', title: 'CP27 Stale Task Test', due, taskListId: tasksClient.defaultListId });
-    await runBriefing(scopeForDay(day, 'that day'), () => {}, undefined, SID, nanoid());
+    await runBriefing(scopeForDay(day, 'that day'), () => {}, undefined, SID, nanoid(), fixedNow());
     const refs = briefingReferenceStore.active(SID) ?? [];
     const idx = refs.findIndex((x) => x.capability === 'tasks' && x.id === created.id);
     check('11-setup. the fresh task is actually referenced', idx !== -1, `refs=${JSON.stringify(refs)}`);
@@ -280,12 +303,12 @@ async function main() {
     const dayB = 65;
     await tasksClient.createTask({ kind: 'create', title: 'Session B exclusive task 12', due: dayRangeIso(dayB).start, taskListId: tasksClient.defaultListId });
 
-    await runBriefing(scopeForDay(day, 'that day'), () => {}, undefined, SID, nanoid());
+    await runBriefing(scopeForDay(day, 'that day'), () => {}, undefined, SID, nanoid(), fixedNow());
     const aRefsBefore = briefingReferenceStore.active(SID);
     const aIdx = (aRefsBefore ?? []).findIndex((x) => x.label === 'Session A exclusive task 12');
     check('12-setup. Session A\'s own briefing captured A\'s exclusive task', aIdx !== -1, `aRefs=${JSON.stringify(aRefsBefore)}`);
 
-    await runBriefing(scopeForDay(dayB, 'that day'), () => {}, undefined, SID_B, nanoid());
+    await runBriefing(scopeForDay(dayB, 'that day'), () => {}, undefined, SID_B, nanoid(), fixedNow());
     const aRefsAfter = briefingReferenceStore.active(SID);
     check('12a. Session B running its OWN briefing never mutates Session A\'s stored reference list', JSON.stringify(aRefsBefore) === JSON.stringify(aRefsAfter), `before=${JSON.stringify(aRefsBefore)} after=${JSON.stringify(aRefsAfter)}`);
 

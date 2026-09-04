@@ -28,8 +28,19 @@ const BRIEFING_TRIGGER_RE =
 // "What's going on today?" is a supported briefing request; "What's going
 // on in the world today?" is a generic news question and must NOT be
 // stolen — the only reliable structural difference between the two
-// phrasings is an explicit world/global scope marker.
-const GENERIC_SCOPE_GUARD_RE = /\b(?:in the world|around the world|globally|worldwide|world news|the news)\b/i;
+// phrasings is an explicit world/global/topic scope marker.
+//
+// Checkpoint 28 — added "in technology" (narrow, additive): CP28's own
+// negative-example testing surfaced that "What's coming up in technology?"
+// already matched this file's bare "what's coming up" trigger (the guard
+// only ever covered "the world"/"the news"-style scope markers, never a
+// generic topic-domain noun), so a caller checking CP27 AFTER CP28 would
+// have re-swallowed a phrase CP28 correctly declined — failing "generic
+// queries must reach their normal route end-to-end." No existing CP27
+// positive example contains "technology" — zero behavior change to any
+// previously-approved phrase; regression-tested in
+// test-cp27-briefing-parsing.ts.
+const GENERIC_SCOPE_GUARD_RE = /\b(?:in the world|around the world|globally|worldwide|world news|the news|in technology)\b/i;
 
 // Checkpoint 27 §19 — a compound "briefing + explicit mutation" sentence
 // ("Brief me on my day and create a task to prepare for my meeting.")
@@ -37,8 +48,20 @@ const GENERIC_SCOPE_GUARD_RE = /\b(?:in the world|around the world|globally|worl
 // a small curated verb list (same "narrow, not a general parser"
 // philosophy as orchestrator's own UNSUPPORTED_ACTION_RE), checked only
 // once a briefing trigger has already matched.
+//
+// Checkpoint 28 — exported (via detectCompoundTail below) so
+// attention/intent.ts can reuse the EXACT same curated verb list rather
+// than maintaining a second, driftable copy — CP28 needs the identical
+// "read-only request + mutation tail" rejection behavior CP27 already
+// established.
 const COMPOUND_TAIL_RE =
   /\b(?:and|then)\b\s+((?:create|add|remind me to|schedule|draft|send|email|cancel|delete|complete|mark)\b.*)$/i;
+
+/** Returns the trailing mutation-request text if `text` contains a compound "...and/then <mutation verb>..." tail, else null. Shared by briefing and attention intent grammars. */
+export function detectCompoundTail(text: string): string | null {
+  const m = COMPOUND_TAIL_RE.exec(text);
+  return m ? m[1].trim() : null;
+}
 
 export type ParsedBriefingIntent =
   | { kind: 'briefing'; scope: BriefingScope }
